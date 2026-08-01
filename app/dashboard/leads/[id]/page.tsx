@@ -12,17 +12,14 @@ export default async function BusinessPage({ params, searchParams }: { params: P
   if (user.role !== "admin") redirect("/dashboard");
   const { id } = await params;
   const query = await searchParams;
-  const statusFilter: WorkflowStatus | "completed_research" | "all" = query.status === "completed_research" ? "completed_research" : isWorkflowStatus(query.status) ? query.status : "all";
+  const statusFilter: WorkflowStatus | "all" = query.status === "completed_research" ? "research_completed" : isWorkflowStatus(query.status) ? query.status : "all";
   const rows = await sql`SELECT l.*, creator.name AS created_by_name, completer.name AS completed_by_name,
     COALESCE((SELECT json_agg(json_build_object('id', i.id, 'url', i.url, 'description', i.description) ORDER BY i.position) FROM lead_images i WHERE i.lead_id=l.id), '[]') AS images,
     COALESCE((SELECT json_agg(json_build_object('id', r.id, 'url', r.url, 'description', r.description) ORDER BY r.position) FROM redesign_images r WHERE r.lead_id=l.id), '[]') AS redesign_images
     FROM leads l LEFT JOIN users creator ON creator.id=l.created_by LEFT JOIN users completer ON completer.id=l.completed_by WHERE l.id=${id}`;
   if (!rows[0]) notFound();
-  const navigation = statusFilter === "all"
-    ? await sql`SELECT id FROM leads ORDER BY created_at DESC`
-    : statusFilter === "completed_research"
-      ? await sql`SELECT id FROM leads WHERE status='completed' ORDER BY created_at DESC`
-      : await sql`SELECT id FROM leads WHERE workflow_status=${statusFilter} ORDER BY created_at DESC`;
+  if (statusFilter !== "all" && rows[0].workflow_status !== statusFilter) redirect(statusFilter === "research_completed" ? "/dashboard/research-completed" : `/dashboard?status=${statusFilter}`);
+  const navigation = statusFilter === "all" ? await sql`SELECT id FROM leads ORDER BY created_at DESC` : await sql`SELECT id FROM leads WHERE workflow_status=${statusFilter} ORDER BY created_at DESC`;
   const index = navigation.findIndex(item => item.id === id);
   const previousId = index > 0 ? navigation[index - 1].id as string : null;
   const nextId = index >= 0 && index < navigation.length - 1 ? navigation[index + 1].id as string : null;

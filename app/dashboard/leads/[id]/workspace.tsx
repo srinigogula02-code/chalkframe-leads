@@ -7,7 +7,7 @@ import { ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronLeft, Copy, Image as
 import { WORKFLOW_LABELS, WORKFLOW_STATUSES, type WorkflowStatus } from "@/lib/workflow";
 import type { BusinessImage, BusinessLead } from "./page";
 
-export default function BusinessWorkspace({ lead, previousId, nextId, statusFilter }: { lead:BusinessLead; previousId:string|null; nextId:string|null; statusFilter:WorkflowStatus|"completed_research"|"all" }) {
+export default function BusinessWorkspace({ lead, previousId, nextId, statusFilter }: { lead:BusinessLead; previousId:string|null; nextId:string|null; statusFilter:WorkflowStatus|"all" }) {
   const router=useRouter();
   const [notes,setNotes]=useState(lead.admin_notes||"");
   const [chatgptUrl,setChatgptUrl]=useState(lead.chatgpt_url||"");
