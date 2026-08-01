@@ -22,6 +22,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   ) SELECT count(*)::int AS updated_count FROM updated`;
 
   if (results[0]?.updated_count !== 1) return NextResponse.json({ error: "This lead is already complete or has an active draft from another team member." }, { status: 409 });
-  const rows = await sql`SELECT l.*, u.name AS completed_by_name, d.name AS draft_by_name, COALESCE((SELECT json_agg(json_build_object('id', i.id, 'url', i.url, 'description', i.description) ORDER BY i.position) FROM lead_images i WHERE i.lead_id=l.id),'[]') AS images FROM leads l LEFT JOIN users u ON u.id=l.completed_by LEFT JOIN users d ON d.id=l.draft_by WHERE l.id=${id}`;
+  const rows = await sql`SELECT l.id, l.ad_url, l.title, l.status, l.facebook_url, l.instagram_url, l.email, l.phone, l.has_website, l.website_status, l.website_url, l.notes, l.created_by, l.completed_by, l.completed_at, l.created_at, l.updated_at, l.draft_by, l.draft_updated_at, l.workflow_status, u.name AS completed_by_name, d.name AS draft_by_name, COALESCE((SELECT json_agg(json_build_object('id', i.id, 'url', i.url, 'description', i.description) ORDER BY i.position) FROM lead_images i WHERE i.lead_id=l.id),'[]') AS images FROM leads l LEFT JOIN users u ON u.id=l.completed_by LEFT JOIN users d ON d.id=l.draft_by WHERE l.id=${id}`;
   return NextResponse.json({ lead: rows[0], savedAt: new Date().toISOString() });
 }
