@@ -29,6 +29,6 @@ export type BusinessImage = { id?: string; url: string; description: string | nu
 export type BusinessLead = {
   id:string; title:string|null; ad_url:string; status:"pending"|"completed"; workflow_status:WorkflowStatus;
   facebook_url:string|null; instagram_url:string|null; email:string|null; phone:string|null;
-  website_status:"unknown"|"yes"|"no"; website_url:string|null; notes:string|null; admin_notes:string|null;
+  website_status:"unknown"|"yes"|"no"; website_url:string|null; notes:string|null; admin_notes:string|null; chatgpt_url:string|null;
   images:BusinessImage[]; redesign_images:BusinessImage[]; completed_by_name:string|null; completed_at:string|null; created_at:string;
 };

@@ -20,8 +20,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (invalid) return NextResponse.json({ error: "Every redesign needs a complete http:// or https:// image URL." }, { status: 400 });
   const imagesJson = JSON.stringify(images);
   const nextStatus = images.length > 0 && ["research_pending", "research_completed"].includes(body.workflowStatus) ? "redesign_created" : body.workflowStatus;
+  const chatgptUrl=clean(body.chatgptUrl,4_000);
+  if(chatgptUrl&&!validUrl(chatgptUrl))return NextResponse.json({error:"ChatGPT URL must start with http:// or https://."},{status:400});
   const result = await sql`WITH updated AS (
-    UPDATE leads SET admin_notes=${clean(body.adminNotes, 10_000) || null}, workflow_status=${nextStatus}, updated_at=now() WHERE id=${id} RETURNING id, workflow_status
+    UPDATE leads SET admin_notes=${clean(body.adminNotes, 10_000) || null}, chatgpt_url=${chatgptUrl||null}, workflow_status=${nextStatus}, updated_at=now() WHERE id=${id} RETURNING id, workflow_status
   ), deleted AS (
     DELETE FROM redesign_images WHERE lead_id IN (SELECT id FROM updated) RETURNING lead_id
   ), inserted AS (
