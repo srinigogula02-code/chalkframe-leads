@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="80" viewBox="0 0 360 80" role="img" aria-labelledby="title desc">
+  <title id="title">Chalkframe</title>
+  <desc id="desc">Chalkframe frame symbol and wordmark for dark backgrounds</desc>
+  <defs>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="360" height="80" rx="16" fill="#0F172A"/>
+  <g transform="translate(18 16)">
+    <rect x="1" y="1" width="46" height="46" fill="#6366F1" fill-opacity=".18" stroke="#6366F1" stroke-width="2"/>
+    <rect x="32" y="32" width="16" height="16" fill="#A78BFA" filter="url(#glow)"/>
+  </g>
+  <text x="84" y="51" fill="#F8FAFC" font-family="Space Grotesk, Arial, sans-serif" font-size="34" font-weight="600" letter-spacing="-1.2">Chalkframe</text>
+</svg>
