@@ -1,0 +1,29 @@
+"use client";
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { ArrowLeft, ArrowRight, ArrowUpRight, Check, Copy, Image as ImageIcon, Mail, X } from "lucide-react";
+import type { RedesignLead, ReviewImage } from "./page";
+
+export default function RedesignReview({ lead, previousId, nextId }: { lead: RedesignLead; previousId: string | null; nextId: string | null }) {
+  const router = useRouter();
+  const [confirmContacted, setConfirmContacted] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<ReviewImage | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => { if (!selectedImage && !confirmContacted) return; const close = (event: KeyboardEvent) => { if (event.key === "Escape") { setSelectedImage(null); setConfirmContacted(false); } }; document.addEventListener("keydown", close); return () => document.removeEventListener("keydown", close); }, [selectedImage, confirmContacted]);
+  async function copyEmail() { if (!lead.email) return; setError(""); try { await navigator.clipboard.writeText(lead.email); setCopied(true); setConfirmContacted(true); window.setTimeout(() => setCopied(false), 1800); } catch { setError("Email could not be copied. Check this browser's clipboard permission and try again."); } }
+  async function moveToContacted() { setBusy(true); setError(""); try { const response = await fetch(`/api/admin/leads/${lead.id}/contacted`, { method: "POST" }); const result = await response.json(); if (!response.ok) throw new Error(result.error || "Phase could not be updated."); router.push("/dashboard/redesign-created"); router.refresh(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Phase could not be updated."); setConfirmContacted(false); setBusy(false); } }
+  return <main className="redesign-review-page">
+    <header className="redesign-review-topbar"><Link href="/dashboard" className="back-link"><ArrowLeft size={16}/>Lead workspace</Link><img src="/brand/chalkframe-logo-dark.svg" alt="Chalkframe"/><nav className="record-nav"><Link aria-disabled={!previousId} className={!previousId ? "disabled" : ""} href={previousId ? `/dashboard/redesign-created/${previousId}` : "#"}><ArrowLeft size={16}/><span>Previous</span></Link><span className="technical">Redesign review</span><Link aria-disabled={!nextId} className={!nextId ? "disabled" : ""} href={nextId ? `/dashboard/redesign-created/${nextId}` : "#"}><span>Next</span><ArrowRight size={16}/></Link></nav></header>
+    <section className="redesign-review-hero"><div className="review-title"><div><span className="technical">Redesign created</span><h1>{lead.title || "Meta ad business"}</h1></div><a href={lead.ad_url} target="_blank" rel="noreferrer">Open source ad <ArrowUpRight size={13}/></a></div>
+      <div className="review-contact-sheet"><ImageColumn label="Original research" title="Ad creatives" images={lead.images} empty="No ad creative images" onSelect={setSelectedImage}/><ImageColumn label="Chalkframe output" title="Redesigns" images={lead.redesign_images} empty="No redesign images" onSelect={setSelectedImage}/><aside className="email-action-card"><span className="technical">Outreach</span><div className="email-icon"><Mail size={22}/></div><h2>Email contact</h2>{lead.email?<><p>{lead.email}</p><button onClick={copyEmail}>{copied ? <Check size={16}/> : <Copy size={16}/>} {copied ? "Copied" : "Copy email"}</button><small>Copying opens the option to move this business to Contacted.</small></>:<><p className="missing-email">No email was found during research.</p><button disabled><Copy size={16}/>Copy email</button><small>Add an email from the business page before contacting.</small></>}{error&&<div className="review-error">{error}</div>}</aside></div>
+    </section>
+    {selectedImage&&<div className="review-lightbox" role="dialog" aria-modal="true" onMouseDown={event=>{if(event.target===event.currentTarget)setSelectedImage(null)}}><button onClick={()=>setSelectedImage(null)} aria-label="Close image"><X size={20}/></button><img src={selectedImage.url} alt={selectedImage.description || "Image preview"}/></div>}
+    {confirmContacted&&<div className="modal-backdrop"><div className="contacted-confirm" role="alertdialog" aria-modal="true" aria-labelledby="contacted-title"><span><Check size={20}/></span><h2 id="contacted-title">Move to Contacted?</h2><p><strong>{lead.email}</strong> was copied. Confirm only after you have sent or recorded the outreach.</p><div>{error&&<div className="review-error">{error}</div>}<button className="secondary-button" onClick={()=>setConfirmContacted(false)} disabled={busy}>Cancel</button><button className="primary-button" onClick={moveToContacted} disabled={busy}>{busy ? "Updating…" : "Proceed"}</button></div></div></div>}
+  </main>;
+}
+
+function ImageColumn({ label, title, images, empty, onSelect }: { label: string; title: string; images: ReviewImage[]; empty: string; onSelect: (image: ReviewImage) => void }) { return <section className="review-image-column"><header><div><span className="technical">{label}</span><h2>{title}</h2></div><b>{images.length}</b></header>{images.length?<div className="review-image-grid">{images.map((image,index)=><button key={image.id || index} onClick={()=>onSelect(image)} aria-label={`View ${title} image ${index+1}`}><img src={image.url} alt={image.description || `${title} image ${index+1}`}/></button>)}</div>:<div className="review-images-empty"><ImageIcon size={25}/><span>{empty}</span></div>}</section>; }
