@@ -31,3 +31,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!result[0]) return NextResponse.json({ error: "Business not found." }, { status: 404 });
   return NextResponse.json({ saved: true, workflowStatus: result[0].workflow_status });
 }
+
+export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {
+  const user = await getSession();
+  if (!user || user.role !== "admin") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { id } = await params;
+  const result = await sql`WITH original_images AS (
+    DELETE FROM lead_images WHERE lead_id=${id}
+  ), redesigns AS (
+    DELETE FROM redesign_images WHERE lead_id=${id}
+  ) DELETE FROM leads WHERE id=${id} RETURNING id`;
+  if (!result[0]) return NextResponse.json({ error: "Business not found." }, { status: 404 });
+  return NextResponse.json({ deleted: true });
+}

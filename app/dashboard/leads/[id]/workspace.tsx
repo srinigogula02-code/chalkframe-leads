@@ -1,18 +1,21 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronLeft, Image as ImageIcon, Mail, Phone, Plus, Save, StickyNote, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronLeft, Image as ImageIcon, Mail, Phone, Plus, Save, StickyNote, Trash2, X } from "lucide-react";
 import { WORKFLOW_LABELS, WORKFLOW_STATUSES, type WorkflowStatus } from "@/lib/workflow";
 import type { BusinessImage, BusinessLead } from "./page";
 
 export default function BusinessWorkspace({ lead, previousId, nextId, statusFilter }: { lead:BusinessLead; previousId:string|null; nextId:string|null; statusFilter:WorkflowStatus|"all" }) {
+  const router=useRouter();
   const [notes,setNotes]=useState(lead.admin_notes||"");
   const [status,setStatus]=useState<WorkflowStatus>(lead.workflow_status);
   const [redesigns,setRedesigns]=useState<BusinessImage[]>(lead.redesign_images.length?lead.redesign_images:[{url:"",description:""}]);
-  const [saving,setSaving]=useState(false); const [message,setMessage]=useState(""); const [error,setError]=useState("");
+  const [saving,setSaving]=useState(false); const [confirmDelete,setConfirmDelete]=useState(false); const [message,setMessage]=useState(""); const [error,setError]=useState("");
   const query=statusFilter==="all"?"":`?status=${statusFilter}`;
   async function save(){setSaving(true);setError("");setMessage("");try{const res=await fetch(`/api/admin/leads/${lead.id}`,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({adminNotes:notes,workflowStatus:status,redesignImages:redesigns})});const body=await res.json();if(!res.ok)throw new Error(body.error||"Changes could not be saved.");setStatus(body.workflowStatus);setMessage("Business workspace saved.")}catch(e){setError(e instanceof Error?e.message:"Changes could not be saved.")}finally{setSaving(false)}}
+  async function remove(){setSaving(true);setError("");try{const res=await fetch(`/api/admin/leads/${lead.id}`,{method:"DELETE"});const body=await res.json();if(!res.ok)throw new Error(body.error||"Could not delete this business.");router.push("/dashboard");router.refresh()}catch(e){setError(e instanceof Error?e.message:"Could not delete this business.");setConfirmDelete(false);setSaving(false)}}
   return <main className="business-page">
     <header className="business-topbar"><Link href="/dashboard" className="back-link"><ChevronLeft size={17}/>Lead workspace</Link><img src="/brand/chalkframe-logo-dark.svg" alt="Chalkframe"/><nav className="record-nav"><Link aria-disabled={!previousId} className={!previousId?"disabled":""} href={previousId?`/dashboard/leads/${previousId}${query}`:"#"}><ArrowLeft size={16}/><span>Previous</span></Link><span className="technical">Business record</span><Link aria-disabled={!nextId} className={!nextId?"disabled":""} href={nextId?`/dashboard/leads/${nextId}${query}`:"#"}><span>Next</span><ArrowRight size={16}/></Link></nav></header>
     <section className="business-hero"><div><h1>{lead.title||"Meta ad business"}</h1><a href={lead.ad_url} target="_blank" rel="noreferrer">Open source ad <ArrowUpRight size={14}/></a></div><label className="status-select">Workflow status<select value={status} onChange={e=>setStatus(e.target.value as WorkflowStatus)}>{WORKFLOW_STATUSES.map(item=><option key={item} value={item}>{WORKFLOW_LABELS[item]}</option>)}</select></label></section>
@@ -23,8 +26,8 @@ export default function BusinessWorkspace({ lead, previousId, nextId, statusFilt
     </div><aside className="business-sidebar">
       <section className="fact-card"><span className="technical">Business details</span><h2>Contact record</h2><Fact label="Facebook" value={lead.facebook_url} link/><Fact label="Instagram" value={lead.instagram_url} link/><Fact label="Email" value={lead.email} icon={<Mail size={14}/>} href={lead.email?`mailto:${lead.email}`:undefined}/><Fact label="Phone" value={lead.phone} icon={<Phone size={14}/>} href={lead.phone?`tel:${lead.phone}`:undefined}/><Fact label="Website" value={lead.website_status==="no"?"No website found":lead.website_url||"Not checked"} link={Boolean(lead.website_url)}/><div className="research-notes"><span>Employee notes</span><p>{lead.notes||"No additional information was added."}</p></div><div className="completed-meta"><span>Research owner</span><strong>{lead.completed_by_name||"Not completed"}</strong>{lead.completed_at&&<small>{new Date(lead.completed_at).toLocaleString("en-IN",{dateStyle:"medium",timeStyle:"short"})}</small>}</div></section>
       <section className="admin-note-card"><div><StickyNote size={17}/><span className="technical">Private admin notes</span></div><p>Only administrators can read these notes.</p><textarea rows={8} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Add follow-up context, positioning ideas, or contact outcomes…"/></section>
-      {(message||error)&&<div className={`workspace-message ${error?"error":""}`}>{error||message}</div>}<button className="save-workspace" onClick={save} disabled={saving}><Save size={16}/>{saving?"Saving…":"Save workspace"}</button>
-    </aside></div>
+      {(message||error)&&<div className={`workspace-message ${error?"error":""}`}>{error||message}</div>}<button className="save-workspace" onClick={save} disabled={saving}><Save size={16}/>{saving?"Saving…":"Save workspace"}</button><button className="delete-business" onClick={()=>setConfirmDelete(true)} disabled={saving}><Trash2 size={15}/>Delete business</button>
+    </aside></div>{confirmDelete&&<div className="modal-backdrop"><div className="confirm-delete" role="alertdialog" aria-modal="true" aria-labelledby="delete-title"><span><Trash2 size={20}/></span><h2 id="delete-title">Delete this business?</h2><p>“{lead.title||"Meta ad business"}” and all its research and redesign images will be permanently removed.</p><div><button className="secondary-button" onClick={()=>setConfirmDelete(false)} disabled={saving}>Cancel</button><button className="danger-button" onClick={remove} disabled={saving}>{saving?"Deleting…":"Yes, delete business"}</button></div></div></div>}
   </main>
 }
 
