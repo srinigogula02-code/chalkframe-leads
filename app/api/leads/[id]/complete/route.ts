@@ -9,14 +9,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const details = normalizeLeadDetails(await req.json());
   const validationError = validateCompletion(details);
   if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
-  const current = await sql`SELECT status FROM leads WHERE id = ${id}`;
+  const current = await sql`SELECT status, completed_by FROM leads WHERE id = ${id}`;
   if (!current[0]) return NextResponse.json({ error: "Lead not found." }, { status: 404 });
-  if (current[0].status === "completed" && user.role !== "admin") return NextResponse.json({ error: "This lead is already complete." }, { status: 409 });
+  const ownsCompletion = current[0].status === "completed" && current[0].completed_by === user.id;
+  if (current[0].status === "completed" && user.role !== "admin" && !ownsCompletion) return NextResponse.json({ error: "Only the employee who completed this business can edit it." }, { status: 403 });
   const imagesJson = JSON.stringify(details.images.filter(image => image.url));
   const isAdmin = user.role === "admin";
   const results = await sql`WITH updated AS (
     UPDATE leads SET facebook_url=${details.facebookUrl || null}, instagram_url=${details.instagramUrl || null}, email=${details.email || null}, phone=${details.phone || null}, website_status=${details.websiteStatus}, has_website=${details.websiteStatus === "yes"}, website_url=${details.websiteUrl || null}, notes=${details.notes || null}, status='completed', workflow_status=CASE WHEN workflow_status='research_pending' THEN 'research_completed' ELSE workflow_status END, completed_by=CASE WHEN status='completed' THEN completed_by ELSE ${user.id} END, completed_at=COALESCE(completed_at, now()), draft_by=NULL, draft_updated_at=NULL, updated_at=now()
-    WHERE id=${id} AND (status='pending' OR ${isAdmin}) AND (${isAdmin} OR draft_by IS NULL OR draft_by=${user.id} OR draft_updated_at < now() - interval '24 hours') RETURNING id
+    WHERE id=${id} AND (status='pending' OR ${isAdmin} OR completed_by=${user.id}) AND (${isAdmin} OR status='completed' OR draft_by IS NULL OR draft_by=${user.id} OR draft_updated_at < now() - interval '24 hours') RETURNING id
   ), deleted AS (
     DELETE FROM lead_images WHERE lead_id IN (SELECT id FROM updated) RETURNING lead_id
   ), inserted AS (
