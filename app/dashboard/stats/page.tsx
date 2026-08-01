@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowRight, BarChart3, LayoutGrid, LogOut } from "lucide-react";
+import { ArrowRight, BarChart3, CheckCircle2, LayoutGrid, LogOut, Users } from "lucide-react";
 import { logoutAction } from "@/app/actions";
 import { getSession } from "@/lib/auth";
 import { sql } from "@/lib/db";
@@ -29,7 +29,7 @@ export default async function StatsPage() {
   const progressed = counts.redesign_created + counts.contacted;
 
   return <main className="app-shell stats-shell">
-    <aside className="sidebar"><img src="/brand/chalkframe-logo-dark.svg" alt="Chalkframe" className="side-logo"/><nav><Link className="nav-item" href="/dashboard"><LayoutGrid size={18}/>Leads</Link><Link className="nav-item active" href="/dashboard/stats"><BarChart3 size={18}/>Stats</Link></nav><div className="side-bottom"><div className="user-chip"><span>{user.name.charAt(0)}</span><div><strong>{user.name}</strong><small>{user.role}</small></div></div><form action={logoutAction}><button className="logout" aria-label="Sign out"><LogOut size={17}/></button></form></div></aside>
+    <aside className="sidebar"><img src="/brand/chalkframe-logo-dark.svg" alt="Chalkframe" className="side-logo"/><nav><Link className="nav-item" href="/dashboard"><LayoutGrid size={18}/>Leads</Link><Link className="nav-item" href="/dashboard?status=research_completed"><CheckCircle2 size={18}/>Research completed</Link><Link className="nav-item active" href="/dashboard/stats"><BarChart3 size={18}/>Stats</Link><Link className="nav-item" href="/dashboard#team"><Users size={18}/>Team earnings</Link></nav><div className="side-bottom"><div className="user-chip"><span>{user.name.charAt(0)}</span><div><strong>{user.name}</strong><small>{user.role}</small></div></div><form action={logoutAction}><button className="logout" aria-label="Sign out"><LogOut size={17}/></button></form></div></aside>
     <section className="workspace stats-workspace">
       <header className="topbar stats-topbar"><div><span className="technical">Chalkframe / Pipeline</span><h1>Business stats</h1><p>Current position of every business in the workflow.</p></div><Link className="secondary-button" href="/dashboard">View businesses</Link></header>
       <section className="stats-summary" aria-label="Pipeline summary"><div><span className="technical">All businesses</span><strong>{total.toLocaleString("en-IN")}</strong><small>records in the lead workspace</small></div><div><span className="technical">Past research</span><strong>{progressed.toLocaleString("en-IN")}</strong><small>{total ? Math.round(progressed / total * 100) : 0}% redesigned or contacted</small></div><div className="stats-attention"><span className="technical">Largest phase</span><strong>{WORKFLOW_LABELS[largest]}</strong><small>{counts[largest].toLocaleString("en-IN")} businesses currently here</small></div></section>
