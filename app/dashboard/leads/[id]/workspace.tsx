@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronLeft, Copy, Image as ImageIcon, Mail, Phone, Plus, Save, StickyNote, Trash2, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronLeft, Copy, Image as ImageIcon, Mail, Phone, Plus, Save, Sparkles, StickyNote, Trash2, X } from "lucide-react";
 import { WORKFLOW_LABELS, WORKFLOW_STATUSES, type WorkflowStatus } from "@/lib/workflow";
 import type { BusinessImage, BusinessLead } from "./page";
 
@@ -16,6 +16,8 @@ export default function BusinessWorkspace({ lead, previousId, nextId, statusFilt
   const [selectedImage,setSelectedImage]=useState<BusinessImage|null>(null); const [copied,setCopied]=useState(false);
   const [saving,setSaving]=useState(false); const [uploading,setUploading]=useState(false); const [confirmDelete,setConfirmDelete]=useState(false); const [message,setMessage]=useState(""); const [error,setError]=useState("");
   const query=statusFilter==="all"?"":`?status=${statusFilter}`;
+  const chatGptPrompt="Think like you're the world's best performance marketing ad creator, someone who understands every aspect including user psychology, design, and all other relevant considerations. Redesign this ad creative considering all aspects. @Create image. You don't have to include all the information if it would look cluttered. Remember, this is for an Instagram ad creative; too much information will result in a cluttered look, especially on small mobile screens.";
+  const chatGptHref=`https://chatgpt.com/?q=${encodeURIComponent(chatGptPrompt)}`;
   useEffect(()=>{if(!selectedImage)return;const close=(event:KeyboardEvent)=>{if(event.key==="Escape")setSelectedImage(null)};document.addEventListener("keydown",close);return()=>document.removeEventListener("keydown",close)},[selectedImage]);
   function showImage(image:BusinessImage){setSelectedImage(image);setCopied(false)}
   async function copyDescription(){if(!selectedImage?.description)return;await navigator.clipboard.writeText(selectedImage.description);setCopied(true);window.setTimeout(()=>setCopied(false),1800)}
@@ -25,7 +27,7 @@ export default function BusinessWorkspace({ lead, previousId, nextId, statusFilt
   function handlePaste(event:React.ClipboardEvent){const image=[...event.clipboardData.items].find(item=>item.kind==="file"&&item.type.startsWith("image/"))?.getAsFile();if(!image)return;event.preventDefault();event.stopPropagation();if(!uploading)void uploadPastedImage(image)}
   async function remove(){setSaving(true);setError("");try{const res=await fetch(`/api/admin/leads/${lead.id}`,{method:"DELETE"});const body=await res.json();if(!res.ok)throw new Error(body.error||"Could not delete this business.");router.push("/dashboard");router.refresh()}catch(e){setError(e instanceof Error?e.message:"Could not delete this business.");setConfirmDelete(false);setSaving(false)}}
   return <main className="business-page">
-    <header className="business-topbar"><Link href="/dashboard" className="back-link"><ChevronLeft size={17}/>Lead workspace</Link><img src="/brand/chalkframe-logo-dark.svg" alt="Chalkframe"/><nav className="record-nav"><Link aria-disabled={!previousId} className={!previousId?"disabled":""} href={previousId?`/dashboard/leads/${previousId}${query}`:"#"}><ArrowLeft size={16}/><span>Previous</span></Link><span className="technical">Business record</span><Link aria-disabled={!nextId} className={!nextId?"disabled":""} href={nextId?`/dashboard/leads/${nextId}${query}`:"#"}><span>Next</span><ArrowRight size={16}/></Link></nav></header>
+    <header className="business-topbar"><Link href="/dashboard" className="back-link"><ChevronLeft size={17}/>Lead workspace</Link><img src="/brand/chalkframe-logo-dark.svg" alt="Chalkframe"/><nav className="record-nav">{status==="research_completed"&&<a className="chatgpt-launch" href={chatGptHref} target="_blank" rel="noreferrer"><Sparkles size={14}/>Open ChatGPT</a>}<Link aria-disabled={!previousId} className={!previousId?"disabled":""} href={previousId?`/dashboard/leads/${previousId}${query}`:"#"}><ArrowLeft size={16}/><span>Previous</span></Link><span className="technical">Business record</span><Link aria-disabled={!nextId} className={!nextId?"disabled":""} href={nextId?`/dashboard/leads/${nextId}${query}`:"#"}><span>Next</span><ArrowRight size={16}/></Link></nav></header>
     <section className="business-hero"><div><h1>{lead.title||"Meta ad business"}</h1><a href={lead.ad_url} target="_blank" rel="noreferrer">Open source ad <ArrowUpRight size={14}/></a></div><label className="status-select">Workflow status<select value={status} onChange={e=>setStatus(e.target.value as WorkflowStatus)}>{WORKFLOW_STATUSES.map(item=><option key={item} value={item}>{WORKFLOW_LABELS[item]}</option>)}</select></label></section>
     <section className="workflow-rail">{WORKFLOW_STATUSES.map((item,index)=>{const current=WORKFLOW_STATUSES.indexOf(status);return <div className={index<=current?"reached":""} key={item}><i>{index<current?<Check size={13}/>:index+1}</i><span>{WORKFLOW_LABELS[item]}</span></div>})}</section>
     <div className="business-layout"><div className="business-canvas">
