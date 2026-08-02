@@ -19,10 +19,14 @@ export default async function BusinessPage({ params, searchParams }: { params: P
     FROM leads l LEFT JOIN users creator ON creator.id=l.created_by LEFT JOIN users completer ON completer.id=l.completed_by WHERE l.id=${id}`;
   if (!rows[0]) notFound();
   if (statusFilter !== "all" && rows[0].workflow_status !== statusFilter) redirect(statusFilter === "research_completed" ? "/dashboard/research-completed" : `/dashboard?status=${statusFilter}`);
-  const navigation = statusFilter === "all" ? await sql`SELECT id FROM leads ORDER BY created_at DESC` : await sql`SELECT id FROM leads WHERE workflow_status=${statusFilter} ORDER BY created_at DESC`;
-  const index = navigation.findIndex(item => item.id === id);
-  const previousId = index > 0 ? navigation[index - 1].id as string : null;
-  const nextId = index >= 0 && index < navigation.length - 1 ? navigation[index + 1].id as string : null;
+  const currentCreatedAt=rows[0].created_at;
+  const filterValue=statusFilter==="all"?"research_pending":statusFilter;
+  const [previous,next]=await Promise.all([
+    sql`SELECT id FROM leads WHERE (${statusFilter==="all"} OR workflow_status=${filterValue}) AND (created_at>${currentCreatedAt} OR (created_at=${currentCreatedAt} AND id>${id})) ORDER BY created_at ASC,id ASC LIMIT 1`,
+    sql`SELECT id FROM leads WHERE (${statusFilter==="all"} OR workflow_status=${filterValue}) AND (created_at<${currentCreatedAt} OR (created_at=${currentCreatedAt} AND id<${id})) ORDER BY created_at DESC,id DESC LIMIT 1`,
+  ]);
+  const previousId=previous[0]?.id?String(previous[0].id):null;
+  const nextId=next[0]?.id?String(next[0].id):null;
   return <BusinessWorkspace lead={rows[0] as unknown as BusinessLead} previousId={previousId} nextId={nextId} statusFilter={statusFilter} />;
 }
 
