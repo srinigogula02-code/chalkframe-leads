@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { sql } from "@/lib/db";
 import { getDashboardData } from "@/lib/dashboard-data";
+import { parseMetaAdLibraryUrl } from "@/lib/meta-ad";
 
 export async function GET(req: Request) {
   const user = await getSession();
@@ -20,14 +21,14 @@ export async function POST(req: Request) {
   const user = await getSession();
   if (!user || user.role !== "admin") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { adUrl, title } = await req.json();
-  let parsed: URL;
-  try { parsed = new URL(String(adUrl)); } catch { return NextResponse.json({ error: "Enter a valid Meta Ad Library URL." }, { status: 400 }); }
-  if (!["facebook.com", "www.facebook.com"].includes(parsed.hostname) || !parsed.pathname.startsWith("/ads/library")) return NextResponse.json({ error: "Use a link copied from the Meta Ad Library." }, { status: 400 });
+  const ad = parseMetaAdLibraryUrl(adUrl);
+  if (!ad) return NextResponse.json({ error: "Use a Meta Ad Library link containing a valid ad ID." }, { status: 400 });
   try {
-    const rows = await sql`INSERT INTO leads (ad_url, title, created_by) VALUES (${parsed.toString()}, ${String(title || "").trim().slice(0, 160) || null}, ${user.id}) RETURNING *, '[]'::json AS images`;
+    const rows = await sql`INSERT INTO leads (ad_url, meta_ad_id, title, created_by) VALUES (${ad.canonicalUrl}, ${ad.adId}, ${String(title || "").trim().slice(0, 160) || null}, ${user.id}) ON CONFLICT (meta_ad_id) DO NOTHING RETURNING *, '[]'::json AS images`;
+    if (!rows[0]) return NextResponse.json({ error: "This ad is already in Leads." }, { status: 409 });
     return NextResponse.json({ lead: rows[0] });
   } catch (error) {
-    if (String(error).includes("leads_ad_url_unique")) return NextResponse.json({ error: "This ad is already in the queue." }, { status: 409 });
+    console.error("Dashboard lead capture failed", error);
     return NextResponse.json({ error: "The lead could not be added." }, { status: 500 });
   }
 }
