@@ -30,14 +30,14 @@ export async function PATCH(req: Request) {
   const available = await getVisionModels();
   if (available.length) {
     const ids = new Set(available.map(option => option.id));
-    if (!ids.has(model)) return NextResponse.json({ error: "The primary model is unavailable or cannot read images." }, { status: 400 });
-    if (fallbackModel && !ids.has(fallbackModel)) return NextResponse.json({ error: "The fallback model is unavailable or cannot read images." }, { status: 400 });
+    if (!ids.has(model)) return NextResponse.json({ error: `Model "${model}" is not a recognized vision-capable model.` }, { status: 400 });
+    if (fallbackModel && !ids.has(fallbackModel)) return NextResponse.json({ error: `Fallback model "${fallbackModel}" is not a recognized vision-capable model.` }, { status: 400 });
   }
 
   const rows = await sql`UPDATE ai_settings SET enabled=${body.enabled !== false}, model=${model}, fallback_model=${fallbackModel || null},
     temperature=${temperature}, max_output_tokens=${maxOutputTokens}, max_cost_usd=${maxCostUsd}, monthly_budget_usd=${monthlyBudgetUsd},
     system_prompt_override=${systemPromptOverride || null}, updated_by=${user.id}, updated_at=now()
-    WHERE id=1 RETURNING enabled, model, fallback_model, temperature, max_output_tokens, max_cost_usd, monthly_budget_usd, updated_at`;
+    WHERE id=1 RETURNING enabled, model, fallback_model, temperature, max_output_tokens, max_cost_usd, monthly_budget_usd, system_prompt_override, updated_at`;
   if (!rows[0]) return NextResponse.json({ error: "AI settings are not initialized." }, { status: 500 });
   return NextResponse.json({ saved: true, settings: rows[0] });
 }

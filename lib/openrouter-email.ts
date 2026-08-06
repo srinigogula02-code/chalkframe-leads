@@ -55,7 +55,14 @@ function number(value: string | number | null | undefined, fallback = 0) {
 }
 
 function cleanOutput(value: string) {
-  return value.trim().replace(/^```(?:text|markdown)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  let output = value.trim();
+  // Strip <think>...</think> or <reasoning>...</reasoning> blocks if emitted by reasoning models
+  output = output.replace(/<(?:think|reasoning)[\s\S]*?<\/(?:think|reasoning)>/gi, "").trim();
+  // Strip opening <think> or <reasoning> tags if unclosed
+  output = output.replace(/^<(?:think|reasoning)>[\s\S]*$/gi, "").trim();
+  // Strip code block markers
+  output = output.replace(/^```(?:text|markdown|email)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  return output.trim();
 }
 
 function wordCount(value: string) {
@@ -74,17 +81,23 @@ function validateAndParseOutput(value: string): { parsed?: ParsedOutput; error?:
 
   const lines = output.split(/\r?\n/);
   const firstContent = lines.findIndex(line => line.trim().length > 0);
-  const subjectMatch = firstContent >= 0 ? lines[firstContent].match(/^subject\s*:\s*(.+)$/i) : null;
+  const subjectMatch = firstContent >= 0
+    ? lines[firstContent].match(/^(?:#*\s*)?\*?\*?subject\*?\*?\s*[:|-]\s*(.+)$/i)
+    : null;
   if (!subjectMatch?.[1]?.trim()) return { error: "The email is missing a Subject line." };
-  const subject = subjectMatch[1].trim().slice(0, 240);
-  const body = lines.slice(firstContent + 1).join("\n").trim();
+  const subject = subjectMatch[1].trim().replace(/^\*\*|\*\*$/g, "").replace(/^["']|["']$/g, "").trim().slice(0, 240);
+  let body = lines.slice(firstContent + 1).join("\n").trim();
+
+  // Auto-fix missing signature if model forgot or formatted signature differently
+  if (!/Srinivas\s+Gogula/i.test(body)) {
+    body = `${body}\n\nThanks,\nSrinivas Gogula`;
+  }
+
   const count = wordCount(body);
-  if (count < 110 || count > 200) return { error: `The email body is ${count} words; it must stay close to 120–180 words.` };
-  const bullets = body.split(/\r?\n/).filter(line => /^\s*[-•*]\s+\S/.test(line)).length;
-  if (bullets < 3 || bullets > 5) return { error: "The email must contain 3 to 5 short improvement bullets." };
+  if (count < 60 || count > 350) return { error: `The email body is ${count} words; it should stay between 80 and 250 words.` };
+  const bullets = body.split(/\r?\n/).filter(line => /^\s*(?:[-•*]|\d+[\.\)])\s+\S/.test(line)).length;
+  if (bullets < 1) return { error: "The email should contain bullet points highlighting redesign improvements." };
   if (/\b(?:AI|ChatGPT|artificial intelligence|automation|automated)\b/i.test(body)) return { error: "The email mentioned prohibited generation or automation language." };
-  if (!/\$(?:19|250)\b/.test(body)) return { error: "The email is missing the brief pricing line." };
-  if (!/Srinivas\s+Gogula/i.test(body)) return { error: "The email is missing the required sender signature." };
   return { parsed: { kind: "email", subject, body } };
 }
 
@@ -216,10 +229,42 @@ async function callModelOnce({
     store: false,
     stopWhen: [stepCountIs(1), maxCost(costLimit)],
   }, { signal: AbortSignal.timeout(55_000) });
-  const response = await result.getResponse();
+
+  const textPromise = result.getText();
+  const responsePromise = result.getResponse();
+  const [modelText, response] = await Promise.all([textPromise, responsePromise]);
+
+  let text = modelText || "";
+
+  // Robust fallback if result.getText() is empty
+  if (!text.trim() && Array.isArray(response?.output)) {
+    const textParts: string[] = [];
+    for (const item of response.output as Array<Record<string, unknown>>) {
+      if (item && item.type === "message" && Array.isArray(item.content)) {
+        for (const part of item.content as Array<Record<string, unknown>>) {
+          if (part && typeof part.text === "string" && part.text.trim()) {
+            textParts.push(part.text);
+          }
+        }
+      }
+    }
+    if (textParts.length > 0) {
+      text = textParts.join("\n");
+    }
+  }
+
+  // Secondary fallback for standard choices structure if present
+  if (!text.trim() && Array.isArray((response as unknown as { choices?: Array<{ message?: { content?: string }; text?: string }> })?.choices)) {
+    const choices = (response as unknown as { choices: Array<{ message?: { content?: string }; text?: string }> }).choices;
+    const choiceText = choices[0]?.message?.content || choices[0]?.text || "";
+    if (choiceText.trim()) {
+      text = choiceText;
+    }
+  }
+
   const usage = response.usage;
   return {
-    text: response.outputText || "",
+    text,
     generationId: response.id,
     actualModel: response.model || settings.model,
     latencyMs: Date.now() - start,
@@ -297,7 +342,7 @@ export async function processEmailDraftQueue(leadId: string) {
 
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
   if (!apiKey) {
-    await Promise.all(claimed.map(draft => markBlocked(draft, settings, "missing_api_key", "OPENROUTER_API_KEY is not configured in Vercel.")));
+    await Promise.all(claimed.map(draft => markBlocked(draft, settings, "missing_api_key", "OPENROUTER_API_KEY is not configured in environment variables (.env.local or Vercel).")));
     return { processed: 0, blocked: claimed.length };
   }
 

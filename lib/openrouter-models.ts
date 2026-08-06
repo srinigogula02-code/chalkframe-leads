@@ -8,6 +8,7 @@ export type OpenRouterModelOption = {
   completionPrice: number | null;
   imagePrice: number | null;
   expirationDate: string | null;
+  isVision: boolean;
 };
 
 type ModelResponse = {
@@ -27,7 +28,7 @@ function price(value: string | undefined) {
   return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
-export async function getVisionModels(): Promise<OpenRouterModelOption[]> {
+export async function getOpenRouterModels(): Promise<OpenRouterModelOption[]> {
   try {
     const response = await fetch("https://openrouter.ai/api/v1/models", {
       headers: { accept: "application/json" },
@@ -38,21 +39,36 @@ export async function getVisionModels(): Promise<OpenRouterModelOption[]> {
     const body = await response.json() as ModelResponse;
     const now = Date.now();
     return (body.data ?? [])
-      .filter(model => model.id && model.architecture?.input_modalities?.includes("image") && model.architecture?.output_modalities?.includes("text"))
-      .filter(model => !model.expiration_date || Date.parse(model.expiration_date) > now)
-      .map(model => ({
-        id: String(model.id),
-        name: model.name || String(model.id),
-        contextLength: Number(model.context_length || 0),
-        promptPrice: price(model.pricing?.prompt),
-        completionPrice: price(model.pricing?.completion),
-        imagePrice: price(model.pricing?.image),
-        expirationDate: model.expiration_date || null,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .filter(model => model.id && (!model.expiration_date || Date.parse(model.expiration_date) > now))
+      .map(model => {
+        const isVision = Boolean(
+          model.architecture?.input_modalities?.includes("image") ||
+          model.architecture?.output_modalities?.includes("image") ||
+          /vision|gpt-4o|gemini|claude-3|qwen-vl|pixtral|llava|cogvlm|multimodal/i.test(model.id || "")
+        );
+        return {
+          id: String(model.id),
+          name: model.name || String(model.id),
+          contextLength: Number(model.context_length || 0),
+          promptPrice: price(model.pricing?.prompt),
+          completionPrice: price(model.pricing?.completion),
+          imagePrice: price(model.pricing?.image),
+          expirationDate: model.expiration_date || null,
+          isVision,
+        };
+      })
+      .sort((a, b) => {
+        if (a.isVision !== b.isVision) return a.isVision ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
   } catch {
     return [];
   }
+}
+
+export async function getVisionModels(): Promise<OpenRouterModelOption[]> {
+  const all = await getOpenRouterModels();
+  return all.filter(m => m.isVision);
 }
 
 export async function getOpenRouterCredits() {
