@@ -139,7 +139,6 @@ export async function generateAdRedesign({
     }
 
     let finalRedesignBytes: Buffer | null = null;
-    let contentType = "image/webp";
 
     // If OpenRouter model returned a direct base64 image or URL:
     if (rawImageOutput.startsWith("data:image/")) {
@@ -160,7 +159,7 @@ export async function generateAdRedesign({
       const seed = Math.floor(Math.random() * 1_000_000);
       const cleanPrompt = `Modern uncluttered Instagram ad creative for ${leadTitle}, sleek performance marketing aesthetic, elegant typography, premium product photography, 4:5 ratio, high contrast visual hierarchy`;
       const fluxUrl = `https://pollinations.ai/p/${encodeURIComponent(cleanPrompt)}?width=1080&height=1080&seed=${seed}&model=flux&nologo=true`;
-      
+
       const fluxRes = await fetch(fluxUrl, { signal: AbortSignal.timeout(25_000) });
       if (!fluxRes.ok) throw new Error("Could not generate redesign image file.");
       finalRedesignBytes = Buffer.from(await fluxRes.arrayBuffer());
@@ -194,11 +193,17 @@ export async function generateAdRedesign({
 
     const redesignId = String(redesignInsert[0].id);
 
+    // Update redesign run audit log
     await sql`UPDATE lead_ad_redesign_runs
       SET status='completed', actual_model=${actualModelName},
           redesign_image_id=${redesignId}, redesign_image_url=${finalRedesignUrl}, cost_usd=${estimatedCostUsd},
           latency_ms=${latencyMs}, completed_at=now()
       WHERE id=${runId}`;
+
+    // Automatically transition business lead workflow status to 'redesign_created'
+    await sql`UPDATE leads
+      SET workflow_status='redesign_created', updated_at=now()
+      WHERE id=${leadId} AND workflow_status IN ('research_pending', 'research_completed')`;
 
     return {
       runId,
