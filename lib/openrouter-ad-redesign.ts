@@ -27,19 +27,8 @@ async function isValidImageBuffer(buffer: Buffer): Promise<boolean> {
   }
 }
 
-function normalizeOpenRouterModelSlug(modelSlug: string): string {
-  const trimmed = modelSlug.trim();
-  if (/gpt-5\.4-image-2|gpt-5-image-2|openai\/gpt-5\.4-image-2/i.test(trimmed)) {
-    return "openai/gpt-image-2";
-  }
-  if (/gpt-5\.4-image|gpt-5-image|openai\/gpt-5\.4-image/i.test(trimmed)) {
-    return "openai/gpt-image-1";
-  }
-  return trimmed;
-}
-
 function isDedicatedImageModel(modelId: string): boolean {
-  return /gpt-image-|dall-e|seedream|recraft|flux|sdxl|stable-diffusion|imagen|bytedance/i.test(modelId);
+  return /gpt-image-|gpt-5.*image|dall-e|seedream|recraft|flux|sdxl|stable-diffusion|imagen|bytedance/i.test(modelId);
 }
 
 function getModelImageCost(modelId: string): number {
@@ -98,11 +87,10 @@ export async function generateAdRedesign({
   const processedSource = await processAdCreativeImage(sourceImageUrl);
   const promptText = getEffectiveAdRedesignPrompt(settings.system_prompt_override);
 
-  const rawTargetModel = settings.model || "google/gemini-2.5-flash-image";
-  const openRouterModel = normalizeOpenRouterModelSlug(rawTargetModel);
+  const openRouterModel = settings.model || "google/gemini-2.5-flash-image";
 
   const runRows = await sql`INSERT INTO lead_ad_redesign_runs (lead_id, source_image_id, source_image_url, lead_title, trigger, status, requested_model, prompt_used)
-    VALUES (${leadId}, ${sourceImageId || null}, ${processedSource.url}, ${leadTitle}, ${trigger}, 'processing', ${rawTargetModel}, ${promptText})
+    VALUES (${leadId}, ${sourceImageId || null}, ${processedSource.url}, ${leadTitle}, ${trigger}, 'processing', ${openRouterModel}, ${promptText})
     RETURNING id`;
   const runId = String(runRows[0].id);
 
@@ -113,7 +101,7 @@ export async function generateAdRedesign({
     let actualCostUsd: number | null = null;
     let lastErrorMsg = "";
 
-    // Tier 1: Dedicated OpenRouter Image Generation API (/api/v1/images) using "auto" aspect_ratio
+    // Tier 1: Dedicated OpenRouter Image Generation API (/api/v1/images) using exact requested model
     try {
       const attempts = [
         // Attempt A: Pass "auto" aspect ratio (lets OpenRouter & provider pick natively)
