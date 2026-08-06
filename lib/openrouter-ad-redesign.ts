@@ -27,10 +27,6 @@ async function isValidImageBuffer(buffer: Buffer): Promise<boolean> {
   }
 }
 
-function isDedicatedImageModel(modelId: string): boolean {
-  return /gpt-image-|gpt-5.*image|dall-e|seedream|recraft|flux|sdxl|stable-diffusion|imagen|bytedance/i.test(modelId);
-}
-
 function getModelImageCost(modelId: string): number {
   const id = modelId.toLowerCase();
   if (id.includes("gpt-image-2") || id.includes("gpt-5.4-image-2")) return 0.13;
@@ -158,32 +154,33 @@ export async function generateAdRedesign({
     let actualCostUsd: number | null = null;
     let lastErrorMsg = "";
 
-    // Tier 1: Dedicated OpenRouter Image Generation API (/api/v1/images) using exact requested model
+    // Tier 1: Dedicated OpenRouter Image Generation API (/api/v1/images) passing input_references to all models
     try {
       const attempts = [
-        // Attempt A: Pass "auto" aspect ratio with reference image if non-OpenAI
+        // Attempt A: Pass input_references with aspect_ratio "auto"
         {
           model: openRouterModel,
           prompt: fullPromptText,
           aspect_ratio: "auto",
-          ...(!openRouterModel.startsWith("openai/")
-            ? {
-                input_references: [
-                  {
-                    type: "image_url",
-                    image_url: { url: processedSource.url },
-                  },
-                ],
-              }
-            : {}),
+          input_references: [
+            {
+              type: "image_url",
+              image_url: { url: processedSource.url },
+            },
+          ],
         },
-        // Attempt B: Minimal payload (prompt only with aspect_ratio "auto")
+        // Attempt B: Pass input_references without aspect_ratio
         {
           model: openRouterModel,
           prompt: fullPromptText,
-          aspect_ratio: "auto",
+          input_references: [
+            {
+              type: "image_url",
+              image_url: { url: processedSource.url },
+            },
+          ],
         },
-        // Attempt C: Ultra-clean payload (prompt only)
+        // Attempt C: Fallback to prompt-only
         {
           model: openRouterModel,
           prompt: fullPromptText,
@@ -236,8 +233,8 @@ export async function generateAdRedesign({
       console.warn(`Dedicated Image API call to ${openRouterModel} failed:`, imgApiErr);
     }
 
-    // Tier 2: OpenRouter Multimodal Chat Completions API (/api/v1/chat/completions) - Only for LLM models that support image output via chat
-    if (!finalRedesignBytes && !rawImageOutput && !isDedicatedImageModel(openRouterModel)) {
+    // Tier 2: OpenRouter Multimodal Chat Completions API (/api/v1/chat/completions) with image_url input
+    if (!finalRedesignBytes && !rawImageOutput) {
       try {
         const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
           method: "POST",
