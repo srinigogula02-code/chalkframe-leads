@@ -60,82 +60,91 @@ export async function generateAdRedesign({
   const processedSource = await processAdCreativeImage(sourceImageUrl);
   const promptText = getEffectiveAdRedesignPrompt(settings.system_prompt_override);
 
+  const targetModel = settings.model || "google/gemini-2.5-flash-image";
+
   const runRows = await sql`INSERT INTO lead_ad_redesign_runs (lead_id, source_image_id, source_image_url, lead_title, trigger, status, requested_model, prompt_used)
-    VALUES (${leadId}, ${sourceImageId || null}, ${processedSource.url}, ${leadTitle}, ${trigger}, 'processing', ${settings.model}, ${promptText})
+    VALUES (${leadId}, ${sourceImageId || null}, ${processedSource.url}, ${leadTitle}, ${trigger}, 'processing', ${targetModel}, ${promptText})
     RETURNING id`;
   const runId = String(runRows[0].id);
 
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-        "HTTP-Referer": "https://chalkframe.work",
-        "X-Title": "Chalkframe Performance Ad Redesign",
-      },
-      body: JSON.stringify({
-        model: settings.model.includes("image") ? settings.model : "google/gemini-2.5-flash-image",
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: promptText },
-              { type: "image_url", image_url: { url: processedSource.url } },
-            ],
-          },
-        ],
-        temperature: Number(settings.temperature),
-        max_tokens: Number(settings.max_output_tokens),
-      }),
-      signal: AbortSignal.timeout(60_000),
-    });
-
     let rawImageOutput = "";
-    let actualModelName = settings.model;
+    let actualModelName = targetModel;
 
-    if (response.ok) {
-      const payload = (await response.json()) as {
-        id?: string;
-        model?: string;
-        choices?: Array<{
-          message?: {
-            content?: string | Array<{ type: string; image_url?: { url: string }; text?: string }>;
-            images?: Array<string | { type?: string; image_url?: { url?: string }; url?: string }>;
-          };
-        }>;
-      };
+    try {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+          "HTTP-Referer": "https://chalkframe.work",
+          "X-Title": "Chalkframe Performance Ad Redesign",
+        },
+        body: JSON.stringify({
+          model: targetModel,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: promptText },
+                { type: "image_url", image_url: { url: processedSource.url } },
+              ],
+            },
+          ],
+          temperature: Number(settings.temperature),
+          max_tokens: Number(settings.max_output_tokens),
+        }),
+        signal: AbortSignal.timeout(90_000),
+      });
 
-      if (payload.model) actualModelName = payload.model;
-      const choice = payload.choices?.[0]?.message;
+      if (response.ok) {
+        const payload = (await response.json()) as {
+          id?: string;
+          model?: string;
+          choices?: Array<{
+            message?: {
+              content?: string | Array<{ type: string; image_url?: { url: string }; text?: string }>;
+              images?: Array<string | { type?: string; image_url?: { url?: string }; url?: string }>;
+            };
+          }>;
+        };
 
-      // Extract image URL or base64 from images array
-      if (choice?.images && choice.images.length > 0) {
-        const firstImg = choice.images[0];
-        if (typeof firstImg === "string") {
-          rawImageOutput = firstImg;
-        } else if (typeof firstImg === "object" && firstImg !== null) {
-          rawImageOutput = firstImg.image_url?.url || firstImg.url || "";
-        }
-      }
+        if (payload.model) actualModelName = payload.model;
+        const choice = payload.choices?.[0]?.message;
 
-      // Extract base64 or URL from content string if images array is empty
-      if (!rawImageOutput && typeof choice?.content === "string") {
-        const match = choice.content.match(/data:image\/[a-zA-Z+]+;base64,[^\s"')]+/);
-        if (match) {
-          rawImageOutput = match[0];
-        } else {
-          const urlMatch = choice.content.match(/https?:\/\/[^\s"')]+\.(png|jpg|jpeg|webp)/i);
-          if (urlMatch) rawImageOutput = urlMatch[0];
-        }
-      } else if (!rawImageOutput && Array.isArray(choice?.content)) {
-        for (const item of choice.content) {
-          if (item.type === "image_url" && item.image_url?.url) {
-            rawImageOutput = item.image_url.url;
-            break;
+        // Extract image URL or base64 from images array
+        if (choice?.images && choice.images.length > 0) {
+          const firstImg = choice.images[0];
+          if (typeof firstImg === "string") {
+            rawImageOutput = firstImg;
+          } else if (typeof firstImg === "object" && firstImg !== null) {
+            rawImageOutput = firstImg.image_url?.url || firstImg.url || "";
           }
         }
+
+        // Extract base64 or URL from content string if images array is empty
+        if (!rawImageOutput && typeof choice?.content === "string") {
+          const match = choice.content.match(/data:image\/[a-zA-Z+]+;base64,[^\s"')]+/);
+          if (match) {
+            rawImageOutput = match[0];
+          } else {
+            const urlMatch = choice.content.match(/https?:\/\/[^\s"')]+\.(png|jpg|jpeg|webp)/i);
+            if (urlMatch) rawImageOutput = urlMatch[0];
+          }
+        } else if (!rawImageOutput && Array.isArray(choice?.content)) {
+          for (const item of choice.content) {
+            if (item.type === "image_url" && item.image_url?.url) {
+              rawImageOutput = item.image_url.url;
+              break;
+            }
+          }
+        }
+      } else {
+        const errText = await response.text();
+        console.warn(`OpenRouter model ${targetModel} returned status ${response.status}:`, errText.slice(0, 200));
       }
+    } catch (openRouterErr) {
+      console.warn(`OpenRouter call to ${targetModel} failed:`, openRouterErr);
     }
 
     let finalRedesignBytes: Buffer | null = null;
@@ -147,20 +156,24 @@ export async function generateAdRedesign({
         finalRedesignBytes = Buffer.from(matches[2], "base64");
       }
     } else if (rawImageOutput.startsWith("http")) {
-      const imgRes = await fetch(rawImageOutput, { signal: AbortSignal.timeout(15_000) });
-      if (imgRes.ok) {
-        finalRedesignBytes = Buffer.from(await imgRes.arrayBuffer());
+      try {
+        const imgRes = await fetch(rawImageOutput, { signal: AbortSignal.timeout(20_000) });
+        if (imgRes.ok) {
+          finalRedesignBytes = Buffer.from(await imgRes.arrayBuffer());
+        }
+      } catch (err) {
+        console.warn("Could not download image from rawImageOutput URL:", err);
       }
     }
 
-    // Fallback Image Generation Engine: If the LLM returned text/critique instead of direct binary image bytes, generate high quality visual ad creative via Flux
+    // Fallback Image Generation Engine: Render high quality visual ad creative via Flux
     if (!finalRedesignBytes) {
-      console.log("LLM returned conceptual text. Rendering performance marketing ad creative image via Flux...");
+      console.log("Rendering performance marketing ad creative image via Flux fallback engine...");
       const seed = Math.floor(Math.random() * 1_000_000);
       const cleanPrompt = `Modern uncluttered Instagram ad creative for ${leadTitle}, sleek performance marketing aesthetic, elegant typography, premium product photography, 4:5 ratio, high contrast visual hierarchy`;
       const fluxUrl = `https://pollinations.ai/p/${encodeURIComponent(cleanPrompt)}?width=1080&height=1080&seed=${seed}&model=flux&nologo=true`;
 
-      const fluxRes = await fetch(fluxUrl, { signal: AbortSignal.timeout(25_000) });
+      const fluxRes = await fetch(fluxUrl, { signal: AbortSignal.timeout(40_000) });
       if (!fluxRes.ok) throw new Error("Could not generate redesign image file.");
       finalRedesignBytes = Buffer.from(await fluxRes.arrayBuffer());
     }
