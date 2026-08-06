@@ -83,12 +83,13 @@ export default function AdRedesignDashboardClient({
   const activeModel = models.find(m => m.id === settings.model);
 
   return (
-    <section className="ai-workspace">
-      <header className="business-topbar ai-topbar">
-        <Link href="/dashboard" className="back-link">
-          <Bot size={17} /> Dashboard
-        </Link>
-        <img src="/brand/chalkframe-logo-dark.svg" alt="Chalkframe" />
+    <section className="workspace ai-workspace">
+      <header className="topbar ai-topbar">
+        <div>
+          <span className="technical">Chalkframe / AI Redesign Engine</span>
+          <h1>AI Ad Creative Redesigns</h1>
+          <p>Configure OpenRouter models, budgets, system prompts & view generation audit logs.</p>
+        </div>
         <div className="topbar-actions">
           <div className="currency-toggle-card">
             <span className="currency-label">Currency:</span>
