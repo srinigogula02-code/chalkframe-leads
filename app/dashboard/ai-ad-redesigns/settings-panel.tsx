@@ -37,12 +37,14 @@ function ModelSelectorField({
   exchangeRate?: number;
   placeholder?: string;
 }) {
-  const visionModels = useMemo(() => models.filter(m => m.isVision), [models]);
+  const imageGenModels = useMemo(() => models.filter(m => m.isImageGeneration), [models]);
+  const visionModels = useMemo(() => models.filter(m => m.isVision && !m.isImageGeneration), [models]);
+
   const [customMode, setCustomMode] = useState(() => {
-    return Boolean(value && !visionModels.some(m => m.id === value));
+    return Boolean(value && !models.some(m => m.id === value));
   });
 
-  const selectedModel = useMemo(() => visionModels.find(m => m.id === value), [visionModels, value]);
+  const selectedModel = useMemo(() => models.find(m => m.id === value), [models, value]);
 
   return (
     <div className="ai-model-field">
@@ -73,8 +75,17 @@ function ModelSelectorField({
           onChange={e => onChange(e.target.value)}
           className="ai-model-select"
         >
-          {!value && <option value="">-- Choose an OpenRouter image/vision model --</option>}
-          <optgroup label={`📷 Vision & Image Models (${visionModels.length} available)`}>
+          {!value && <option value="">-- Choose an OpenRouter image model --</option>}
+          {imageGenModels.length > 0 && (
+            <optgroup label={`🎨 Image Generation Models (${imageGenModels.length} available - Recommended)`}>
+              {imageGenModels.map(m => (
+                <option key={m.id} value={m.id}>
+                  {m.name} ({m.id}) — {formatPerMillion(m.promptPrice, currency, exchangeRate)} in / {formatPerMillion(m.completionPrice, currency, exchangeRate)} out
+                </option>
+              ))}
+            </optgroup>
+          )}
+          <optgroup label={`📷 Multimodal Vision Models (${visionModels.length} available)`}>
             {visionModels.map(m => (
               <option key={m.id} value={m.id}>
                 {m.name} ({m.id}) — {formatPerMillion(m.promptPrice, currency, exchangeRate)} in / {formatPerMillion(m.completionPrice, currency, exchangeRate)} out
@@ -86,10 +97,10 @@ function ModelSelectorField({
 
       <small>
         {selectedModel
-          ? `${selectedModel.name} (${selectedModel.id}) · 📷 Vision · ${formatPerMillion(selectedModel.promptPrice, currency, exchangeRate)} in · ${formatPerMillion(selectedModel.completionPrice, currency, exchangeRate)} out`
+          ? `${selectedModel.name} (${selectedModel.id}) ${selectedModel.isImageGeneration ? "· 🎨 Direct Image Generation" : "· 📷 Multimodal Vision"} · ${formatPerMillion(selectedModel.promptPrice, currency, exchangeRate)} in · ${formatPerMillion(selectedModel.completionPrice, currency, exchangeRate)} out`
           : value
           ? `Custom model ID: ${value}`
-          : `Choose from ${visionModels.length} image/vision models on OpenRouter.`}
+          : `Choose from ${models.length} image-generation and vision models.`}
       </small>
     </div>
   );
@@ -204,7 +215,7 @@ export default function AdRedesignSettingsPanel({
           models={models}
           currency={currency}
           exchangeRate={exchangeRate}
-          placeholder="e.g. google/gemini-2.5-flash"
+          placeholder="e.g. google/gemini-2.5-flash-image"
         />
 
         <ModelSelectorField

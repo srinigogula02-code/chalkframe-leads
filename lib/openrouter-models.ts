@@ -9,6 +9,7 @@ export type OpenRouterModelOption = {
   imagePrice: number | null;
   expirationDate: string | null;
   isVision: boolean;
+  isImageGeneration: boolean;
 };
 
 type ModelResponse = {
@@ -36,28 +37,41 @@ export async function getOpenRouterModels(): Promise<OpenRouterModelOption[]> {
       signal: AbortSignal.timeout(12_000),
     });
     if (!response.ok) return [];
-    const body = await response.json() as ModelResponse;
+    const body = (await response.json()) as ModelResponse;
     const now = Date.now();
     return (body.data ?? [])
       .filter(model => model.id && (!model.expiration_date || Date.parse(model.expiration_date) > now))
       .map(model => {
-        const isVision = Boolean(
-          model.architecture?.input_modalities?.includes("image") ||
-          model.architecture?.output_modalities?.includes("image") ||
-          /vision|gpt-4o|gemini|claude-3|qwen-vl|pixtral|llava|cogvlm|multimodal/i.test(model.id || "")
+        const id = String(model.id || "");
+        const name = String(model.name || id);
+        const inputs = model.architecture?.input_modalities || [];
+        const outputs = model.architecture?.output_modalities || [];
+
+        const isImageGeneration = Boolean(
+          outputs.includes("image") ||
+          /flux|recraft|sdxl|stable-diffusion|dall-e|imagen|midjourney|ideogram|playground|image-2|image-preview/i.test(id || name)
         );
+
+        const isVision = Boolean(
+          inputs.includes("image") ||
+          outputs.includes("image") ||
+          /vision|gpt-4o|gemini|claude-3|qwen-vl|pixtral|llava|cogvlm|multimodal/i.test(id || name)
+        );
+
         return {
-          id: String(model.id),
-          name: model.name || String(model.id),
+          id,
+          name,
           contextLength: Number(model.context_length || 0),
           promptPrice: price(model.pricing?.prompt),
           completionPrice: price(model.pricing?.completion),
           imagePrice: price(model.pricing?.image),
           expirationDate: model.expiration_date || null,
           isVision,
+          isImageGeneration,
         };
       })
       .sort((a, b) => {
+        if (a.isImageGeneration !== b.isImageGeneration) return a.isImageGeneration ? -1 : 1;
         if (a.isVision !== b.isVision) return a.isVision ? -1 : 1;
         return a.name.localeCompare(b.name);
       });
@@ -71,6 +85,16 @@ export async function getVisionModels(): Promise<OpenRouterModelOption[]> {
   return all.filter(m => m.isVision);
 }
 
+export async function getImageGenerationModels(): Promise<OpenRouterModelOption[]> {
+  const all = await getOpenRouterModels();
+  return all
+    .filter(m => m.isImageGeneration || m.isVision)
+    .sort((a, b) => {
+      if (a.isImageGeneration !== b.isImageGeneration) return a.isImageGeneration ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+}
+
 export async function getOpenRouterCredits() {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return { configured: false, totalCredits: null, totalUsage: null, error: null };
@@ -81,7 +105,7 @@ export async function getOpenRouterCredits() {
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) return { configured: true, totalCredits: null, totalUsage: null, error: `OpenRouter returned ${response.status}` };
-    const payload = await response.json() as { data?: { total_credits?: number; total_usage?: number } };
+    const payload = (await response.json()) as { data?: { total_credits?: number; total_usage?: number } };
     return {
       configured: true,
       totalCredits: Number.isFinite(payload.data?.total_credits) ? Number(payload.data?.total_credits) : null,
@@ -89,6 +113,11 @@ export async function getOpenRouterCredits() {
       error: null,
     };
   } catch (error) {
-    return { configured: true, totalCredits: null, totalUsage: null, error: error instanceof Error ? error.message : "Could not load OpenRouter credits" };
+    return {
+      configured: true,
+      totalCredits: null,
+      totalUsage: null,
+      error: error instanceof Error ? error.message : "Could not load OpenRouter credits",
+    };
   }
 }

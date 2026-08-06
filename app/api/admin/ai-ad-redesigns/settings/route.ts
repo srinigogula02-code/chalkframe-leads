@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { sql } from "@/lib/db";
-import { getVisionModels } from "@/lib/openrouter-models";
+import { getImageGenerationModels } from "@/lib/openrouter-models";
 
 const clean = (value: unknown, max: number) => String(value ?? "").trim().slice(0, max);
 const finite = (value: unknown) => {
@@ -38,11 +38,11 @@ export async function PATCH(req: Request) {
   if (maxCostUsd === null || maxCostUsd <= 0 || maxCostUsd > 10) return NextResponse.json({ error: "Per-image cost limit must be between $0.001 and $10." }, { status: 400 });
   if (monthlyBudgetUsd === null || monthlyBudgetUsd <= 0 || monthlyBudgetUsd > 10_000) return NextResponse.json({ error: "Monthly budget must be between $0.01 and $10,000." }, { status: 400 });
 
-  const available = await getVisionModels();
+  const available = await getImageGenerationModels();
   if (available.length) {
     const ids = new Set(available.map(option => option.id));
-    if (!ids.has(model)) return NextResponse.json({ error: `Model "${model}" is not a recognized vision/image model.` }, { status: 400 });
-    if (fallbackModel && !ids.has(fallbackModel)) return NextResponse.json({ error: `Fallback model "${fallbackModel}" is not a recognized vision/image model.` }, { status: 400 });
+    if (!ids.has(model)) return NextResponse.json({ error: `Model "${model}" is not a recognized vision/image generation model.` }, { status: 400 });
+    if (fallbackModel && !ids.has(fallbackModel)) return NextResponse.json({ error: `Fallback model "${fallbackModel}" is not a recognized vision/image generation model.` }, { status: 400 });
   }
 
   const rows = await sql`UPDATE ai_ad_redesign_settings

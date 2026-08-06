@@ -3,7 +3,7 @@ import { getSession } from "@/lib/auth";
 import { DEFAULT_AD_REDESIGN_SYSTEM_PROMPT } from "@/lib/ad-redesign-prompt";
 import { getUsdToInrRate } from "@/lib/currency";
 import { sql } from "@/lib/db";
-import { getOpenRouterCredits, getVisionModels } from "@/lib/openrouter-models";
+import { getImageGenerationModels, getOpenRouterCredits } from "@/lib/openrouter-models";
 import DashboardSidebar from "../sidebar";
 import AdRedesignDashboardClient, {
   type AdRedesignModelRow,
@@ -37,7 +37,7 @@ export default async function AIAdRedesignsPage() {
       FROM lead_ad_redesign_runs GROUP BY requested_model ORDER BY SUM(cost_usd) DESC NULLS LAST, COUNT(*) DESC LIMIT 12`,
     sql`SELECT id, lead_id, lead_title, status, requested_model, actual_model, source_image_url, redesign_image_url, cost_usd, latency_ms, error_message, created_at
       FROM lead_ad_redesign_runs ORDER BY created_at DESC LIMIT 30`,
-    getVisionModels(),
+    getImageGenerationModels(),
     getOpenRouterCredits(),
     getUsdToInrRate(),
   ]);
