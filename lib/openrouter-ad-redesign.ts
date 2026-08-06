@@ -27,6 +27,20 @@ async function isValidImageBuffer(buffer: Buffer): Promise<boolean> {
   }
 }
 
+function getModelImageCost(modelId: string): number {
+  const id = modelId.toLowerCase();
+  if (id.includes("gpt-image-2") || id.includes("gpt-5.4-image-2")) return 0.13;
+  if (id.includes("gpt-5-image") || id.includes("gpt-5.4-image") || id.includes("gpt-image-1")) return 0.08;
+  if (id.includes("dall-e-3")) return 0.04;
+  if (id.includes("seedream")) return 0.05;
+  if (id.includes("recraft")) return 0.04;
+  if (id.includes("flux.2-pro") || id.includes("flux-1-pro") || id.includes("flux-pro")) return 0.05;
+  if (id.includes("flux-1-schnell") || id.includes("flux-schnell") || id.includes("flux-dev")) return 0.01;
+  if (id.includes("gemini")) return 0.015;
+  if (id.includes("stable-diffusion") || id.includes("sdxl")) return 0.03;
+  return 0.02;
+}
+
 export async function generateAdRedesign({
   leadId,
   sourceImageUrl,
@@ -80,6 +94,7 @@ export async function generateAdRedesign({
     let rawImageOutput = "";
     let actualModelName = targetModel;
     let finalRedesignBytes: Buffer | null = null;
+    let actualCostUsd: number | null = null;
 
     // Tier 1: Dedicated OpenRouter Image Generation API (/api/v1/images)
     try {
@@ -109,7 +124,12 @@ export async function generateAdRedesign({
       if (imgApiRes.ok) {
         const payload = (await imgApiRes.json()) as {
           data?: Array<{ b64_json?: string; url?: string; media_type?: string }>;
+          usage?: { cost?: number };
         };
+        if (typeof payload.usage?.cost === "number" && payload.usage.cost > 0) {
+          actualCostUsd = payload.usage.cost;
+        }
+
         const first = payload.data?.[0];
         if (first?.b64_json) {
           const candidate = Buffer.from(first.b64_json, "base64");
@@ -165,9 +185,14 @@ export async function generateAdRedesign({
                 images?: Array<string | { type?: string; image_url?: { url?: string }; url?: string }>;
               };
             }>;
+            usage?: { cost?: number };
           };
 
           if (payload.model) actualModelName = payload.model;
+          if (typeof payload.usage?.cost === "number" && payload.usage.cost > 0) {
+            actualCostUsd = payload.usage.cost;
+          }
+
           const choice = payload.choices?.[0]?.message;
 
           if (choice?.images && choice.images.length > 0) {
@@ -246,6 +271,9 @@ export async function generateAdRedesign({
       throw new Error("Could not produce a valid image format for performance ad creative redesign.");
     }
 
+    // Determine final billing cost in USD
+    const finalCostUsd = actualCostUsd && actualCostUsd > 0 ? actualCostUsd : getModelImageCost(actualModelName);
+
     // Compress & convert generated image to WebP with sharp
     const compressed = await sharp(finalRedesignBytes)
       .resize({ width: 1080, height: 1080, fit: "inside", withoutEnlargement: true })
@@ -262,7 +290,6 @@ export async function generateAdRedesign({
     });
 
     const latencyMs = Date.now() - startTime;
-    const estimatedCostUsd = 0.005;
 
     // Ensure lead has a selected original creative for collages
     let targetOriginalId = sourceImageId || null;
@@ -289,10 +316,10 @@ export async function generateAdRedesign({
 
     const redesignId = String(redesignInsert[0].id);
 
-    // Update redesign run audit log
+    // Update redesign run audit log with exact billing cost
     await sql`UPDATE lead_ad_redesign_runs
       SET status='completed', actual_model=${actualModelName},
-          redesign_image_id=${redesignId}, redesign_image_url=${finalRedesignUrl}, cost_usd=${estimatedCostUsd},
+          redesign_image_id=${redesignId}, redesign_image_url=${finalRedesignUrl}, cost_usd=${finalCostUsd},
           latency_ms=${latencyMs}, completed_at=now()
       WHERE id=${runId}`;
 
@@ -307,6 +334,7 @@ export async function generateAdRedesign({
       redesignUrl: finalRedesignUrl,
       sourceUrl: processedSource.url,
       latencyMs,
+      costUsd: finalCostUsd,
     };
   } catch (error) {
     const latencyMs = Date.now() - startTime;
