@@ -258,12 +258,15 @@ export default function AdRedesignDashboardClient({
                 const isBlocked = run.status === "blocked";
 
                 return (
-                  <article key={run.id} className={`ad-redesign-run-card ${run.status}`}>
-                    <header className="run-card-header">
+                  <div key={run.id} className={`ad-redesign-run-card ${run.status}`}>
+                    {/* Header Row */}
+                    <div className="run-card-header">
                       <div className="run-header-left">
+                        <span className="run-header-title">{run.lead_title || "Business record"}</span>
+                        <code className="run-model-code">{run.actual_model || run.requested_model}</code>
                         {isProcessing && (
                           <span className="run-status-badge processing">
-                            <Clock3 size={12} className="spin-icon" /> Processing image…
+                            <Clock3 size={12} className="spin-icon" /> Processing…
                           </span>
                         )}
                         {isCompleted && (
@@ -299,14 +302,11 @@ export default function AdRedesignDashboardClient({
                           timeStyle: "short",
                         })}
                       </span>
-                    </header>
+                    </div>
 
+                    {/* Main Body Row */}
                     <div className="run-body">
                       <div className="run-details">
-                        <strong className="run-lead-title">{run.lead_title || "Deleted business record"}</strong>
-                        <span className="run-model-name" title={run.actual_model || run.requested_model}>
-                          Model: <code>{run.actual_model || run.requested_model}</code>
-                        </span>
                         <div className="run-meta-row">
                           {run.latency_ms !== null && <span>⏱️ {(run.latency_ms / 1000).toFixed(1)}s</span>}
                           {run.cost_usd !== null && <span>💰 {formatCurrency(run.cost_usd, currency, 4, exchangeRate)}</span>}
@@ -318,7 +318,7 @@ export default function AdRedesignDashboardClient({
                         </div>
                       </div>
 
-                      {/* Visual Side-by-Side Image Comparison */}
+                      {/* Side-by-Side Images */}
                       <div className="run-images-box">
                         {run.source_image_url && (
                           <div className="run-img-wrapper">
@@ -339,17 +339,17 @@ export default function AdRedesignDashboardClient({
                       </div>
                     </div>
 
-                    {/* Detailed Diagnostic Log Box for Errors or Blocked Execution */}
+                    {/* Diagnostic Error Box */}
                     {(run.error_message || isFailed || isBlocked) && (
                       <div className={`run-error-box ${isBlocked ? "blocked" : ""}`}>
-                        <AlertTriangle size={15} />
+                        <AlertTriangle size={16} />
                         <div>
                           <strong>{isBlocked ? "Budget Limit Enforced" : "Diagnostic Error Log"}</strong>
                           <p>{run.error_message || "The redesign generation attempt failed before completion."}</p>
                         </div>
                       </div>
                     )}
-                  </article>
+                  </div>
                 );
               })}
             </div>
