@@ -23,6 +23,15 @@ type ModelResponse = {
   }>;
 };
 
+type DedicatedImageModelsResponse = {
+  data?: Array<{
+    id?: string;
+    name?: string;
+    description?: string;
+    architecture?: { input_modalities?: string[]; output_modalities?: string[] };
+  }>;
+};
+
 function price(value: string | undefined) {
   if (value === undefined) return null;
   const number = Number(value);
@@ -82,23 +91,58 @@ export async function getVisionModels(): Promise<OpenRouterModelOption[]> {
 }
 
 export async function getImageGenerationModels(): Promise<OpenRouterModelOption[]> {
-  const all = await getOpenRouterModels();
-  const strictImageGen = all.filter(m => m.isImageGeneration);
+  const [all, dedicatedRes] = await Promise.all([
+    getOpenRouterModels(),
+    fetch("https://openrouter.ai/api/v1/images/models", {
+      headers: { accept: "application/json" },
+      next: { revalidate: 900 },
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => null),
+  ]);
 
+  const map = new Map<string, OpenRouterModelOption>();
+
+  // Add image models from general /api/v1/models endpoint
+  all.filter(m => m.isImageGeneration).forEach(m => map.set(m.id, m));
+
+  // Add models from official /api/v1/images/models endpoint
+  if (dedicatedRes && dedicatedRes.ok) {
+    try {
+      const dedicatedBody = (await dedicatedRes.json()) as DedicatedImageModelsResponse;
+      if (Array.isArray(dedicatedBody.data)) {
+        for (const item of dedicatedBody.data) {
+          if (item.id && !map.has(item.id)) {
+            map.set(item.id, {
+              id: item.id,
+              name: item.name || item.id,
+              contextLength: 4096,
+              promptPrice: 0.04,
+              completionPrice: 0.04,
+              imagePrice: 0.04,
+              expirationDate: null,
+              isVision: true,
+              isImageGeneration: true,
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Could not parse /api/v1/images/models:", e);
+    }
+  }
+
+  // Curated defaults fallback list
   const curatedImageGenList: Array<{ id: string; name: string }> = [
     { id: "google/gemini-2.5-flash-image", name: "Google: Gemini 2.5 Flash Image" },
     { id: "google/gemini-3.1-flash-image", name: "Google: Gemini 3.1 Flash Image" },
     { id: "google/gemini-3-pro-image", name: "Google: Gemini 3 Pro Image" },
     { id: "openai/gpt-5-image", name: "OpenAI: GPT-5 Image" },
+    { id: "openai/gpt-image-2", name: "OpenAI: GPT Image 2" },
     { id: "openai/dall-e-3", name: "OpenAI: DALL-E 3" },
     { id: "black-forest-labs/flux-1-schnell", name: "Flux 1 Schnell (Black Forest Labs)" },
     { id: "recraft-ai/recraft-20b", name: "ReCraft 20B Vector & Raster" },
-    { id: "stabilityai/stable-diffusion-3.5-large", name: "Stable Diffusion 3.5 Large" },
-    { id: "openrouter/auto", name: "Auto Router (Image Generation)" },
+    { id: "bytedance-seed/seedream-4.5", name: "ByteDance: Seedream 4.5" },
   ];
-
-  const map = new Map<string, OpenRouterModelOption>();
-  strictImageGen.forEach(m => map.set(m.id, m));
 
   curatedImageGenList.forEach(p => {
     if (!map.has(p.id)) {
@@ -106,9 +150,9 @@ export async function getImageGenerationModels(): Promise<OpenRouterModelOption[
         id: p.id,
         name: p.name,
         contextLength: 4096,
-        promptPrice: 0.005,
-        completionPrice: 0.005,
-        imagePrice: 0.005,
+        promptPrice: 0.04,
+        completionPrice: 0.04,
+        imagePrice: 0.04,
         expirationDate: null,
         isVision: true,
         isImageGeneration: true,

@@ -79,9 +79,11 @@ export async function generateAdRedesign({
   try {
     let rawImageOutput = "";
     let actualModelName = targetModel;
+    let finalRedesignBytes: Buffer | null = null;
 
+    // Tier 1: Dedicated OpenRouter Image Generation API (/api/v1/images)
     try {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      const imgApiRes = await fetch("https://openrouter.ai/api/v1/images", {
         method: "POST",
         headers: {
           authorization: `Bearer ${apiKey}`,
@@ -91,100 +93,143 @@ export async function generateAdRedesign({
         },
         body: JSON.stringify({
           model: targetModel,
-          messages: [
+          prompt: promptText,
+          aspect_ratio: "4:5",
+          output_format: "webp",
+          input_references: [
             {
-              role: "user",
-              content: [
-                { type: "text", text: promptText },
-                { type: "image_url", image_url: { url: processedSource.url } },
-              ],
+              type: "image_url",
+              image_url: { url: processedSource.url },
             },
           ],
-          temperature: Number(settings.temperature),
-          max_tokens: Number(settings.max_output_tokens),
         }),
         signal: AbortSignal.timeout(90_000),
       });
 
-      if (response.ok) {
-        const payload = (await response.json()) as {
-          id?: string;
-          model?: string;
-          choices?: Array<{
-            message?: {
-              content?: string | Array<{ type: string; image_url?: { url: string }; text?: string }>;
-              images?: Array<string | { type?: string; image_url?: { url?: string }; url?: string }>;
-            };
-          }>;
+      if (imgApiRes.ok) {
+        const payload = (await imgApiRes.json()) as {
+          data?: Array<{ b64_json?: string; url?: string; media_type?: string }>;
         };
-
-        if (payload.model) actualModelName = payload.model;
-        const choice = payload.choices?.[0]?.message;
-
-        // Extract image URL or base64 from images array
-        if (choice?.images && choice.images.length > 0) {
-          const firstImg = choice.images[0];
-          if (typeof firstImg === "string") {
-            rawImageOutput = firstImg;
-          } else if (typeof firstImg === "object" && firstImg !== null) {
-            rawImageOutput = firstImg.image_url?.url || firstImg.url || "";
+        const first = payload.data?.[0];
+        if (first?.b64_json) {
+          const candidate = Buffer.from(first.b64_json, "base64");
+          if (await isValidImageBuffer(candidate)) {
+            finalRedesignBytes = candidate;
           }
+        } else if (first?.url) {
+          rawImageOutput = first.url;
         }
+      } else {
+        const errText = await imgApiRes.text();
+        console.warn(`Dedicated Image API (${targetModel}) returned status ${imgApiRes.status}:`, errText.slice(0, 200));
+      }
+    } catch (imgApiErr) {
+      console.warn(`Dedicated Image API call to ${targetModel} failed:`, imgApiErr);
+    }
 
-        // Extract base64 or URL from content string if images array is empty
-        if (!rawImageOutput && typeof choice?.content === "string") {
-          const match = choice.content.match(/data:image\/[a-zA-Z+]+;base64,[^\s"')]+/);
-          if (match) {
-            rawImageOutput = match[0];
-          } else {
-            const urlMatch = choice.content.match(/https?:\/\/[^\s"')]+\.(png|jpg|jpeg|webp)/i);
-            if (urlMatch) rawImageOutput = urlMatch[0];
+    // Tier 2: OpenRouter Multimodal Chat Completions API (/api/v1/chat/completions)
+    if (!finalRedesignBytes && !rawImageOutput) {
+      try {
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${apiKey}`,
+            "content-type": "application/json",
+            "HTTP-Referer": "https://chalkframe.work",
+            "X-Title": "Chalkframe Performance Ad Redesign",
+          },
+          body: JSON.stringify({
+            model: targetModel,
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: promptText },
+                  { type: "image_url", image_url: { url: processedSource.url } },
+                ],
+              },
+            ],
+            temperature: Number(settings.temperature),
+            max_tokens: Number(settings.max_output_tokens),
+          }),
+          signal: AbortSignal.timeout(90_000),
+        });
+
+        if (response.ok) {
+          const payload = (await response.json()) as {
+            id?: string;
+            model?: string;
+            choices?: Array<{
+              message?: {
+                content?: string | Array<{ type: string; image_url?: { url: string }; text?: string }>;
+                images?: Array<string | { type?: string; image_url?: { url?: string }; url?: string }>;
+              };
+            }>;
+          };
+
+          if (payload.model) actualModelName = payload.model;
+          const choice = payload.choices?.[0]?.message;
+
+          if (choice?.images && choice.images.length > 0) {
+            const firstImg = choice.images[0];
+            if (typeof firstImg === "string") {
+              rawImageOutput = firstImg;
+            } else if (typeof firstImg === "object" && firstImg !== null) {
+              rawImageOutput = firstImg.image_url?.url || firstImg.url || "";
+            }
           }
-        } else if (!rawImageOutput && Array.isArray(choice?.content)) {
-          for (const item of choice.content) {
-            if (item.type === "image_url" && item.image_url?.url) {
-              rawImageOutput = item.image_url.url;
-              break;
+
+          if (!rawImageOutput && typeof choice?.content === "string") {
+            const match = choice.content.match(/data:image\/[a-zA-Z+]+;base64,[^\s"')]+/);
+            if (match) {
+              rawImageOutput = match[0];
+            } else {
+              const urlMatch = choice.content.match(/https?:\/\/[^\s"')]+\.(png|jpg|jpeg|webp)/i);
+              if (urlMatch) rawImageOutput = urlMatch[0];
+            }
+          } else if (!rawImageOutput && Array.isArray(choice?.content)) {
+            for (const item of choice.content) {
+              if (item.type === "image_url" && item.image_url?.url) {
+                rawImageOutput = item.image_url.url;
+                break;
+              }
             }
           }
         }
-      } else {
-        const errText = await response.text();
-        console.warn(`OpenRouter model ${targetModel} returned status ${response.status}:`, errText.slice(0, 200));
+      } catch (chatErr) {
+        console.warn(`Chat completions call to ${targetModel} failed:`, chatErr);
       }
-    } catch (openRouterErr) {
-      console.warn(`OpenRouter call to ${targetModel} failed:`, openRouterErr);
     }
 
-    let finalRedesignBytes: Buffer | null = null;
-
-    // Validate if OpenRouter model returned a direct base64 image or image URL:
-    if (rawImageOutput.startsWith("data:image/")) {
-      const matches = rawImageOutput.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
-      if (matches) {
-        const candidate = Buffer.from(matches[2], "base64");
-        if (await isValidImageBuffer(candidate)) {
-          finalRedesignBytes = candidate;
-        }
-      }
-    } else if (rawImageOutput.startsWith("http")) {
-      try {
-        const imgRes = await fetch(rawImageOutput, { signal: AbortSignal.timeout(25_000) });
-        const cType = imgRes.headers.get("content-type") || "";
-        if (imgRes.ok && (cType.startsWith("image/") || cType.includes("octet-stream"))) {
-          const candidate = Buffer.from(await imgRes.arrayBuffer());
+    // Decode base64 or fetch rawImageOutput if populated
+    if (!finalRedesignBytes && rawImageOutput) {
+      if (rawImageOutput.startsWith("data:image/")) {
+        const matches = rawImageOutput.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+        if (matches) {
+          const candidate = Buffer.from(matches[2], "base64");
           if (await isValidImageBuffer(candidate)) {
             finalRedesignBytes = candidate;
           }
         }
-      } catch (err) {
-        console.warn("Could not download image from rawImageOutput URL:", err);
+      } else if (rawImageOutput.startsWith("http")) {
+        try {
+          const imgRes = await fetch(rawImageOutput, { signal: AbortSignal.timeout(25_000) });
+          const cType = imgRes.headers.get("content-type") || "";
+          if (imgRes.ok && (cType.startsWith("image/") || cType.includes("octet-stream"))) {
+            const candidate = Buffer.from(await imgRes.arrayBuffer());
+            if (await isValidImageBuffer(candidate)) {
+              finalRedesignBytes = candidate;
+            }
+          }
+        } catch (err) {
+          console.warn("Could not download image from rawImageOutput URL:", err);
+        }
       }
     }
 
-    // Fallback Image Generation Engine: Render high quality visual ad creative via Flux
+    // Tier 3: Fallback Image Generation Engine via Flux
     if (!finalRedesignBytes) {
-      console.log("LLM returned text/non-image response. Rendering performance marketing ad creative image via Flux fallback engine...");
+      console.log("Rendering performance marketing ad creative image via Flux fallback engine...");
       const seed = Math.floor(Math.random() * 1_000_000);
       const cleanPrompt = `Modern uncluttered Instagram ad creative for ${leadTitle}, sleek performance marketing aesthetic, elegant typography, premium product photography, 4:5 ratio, high contrast visual hierarchy`;
       const fluxUrl = `https://pollinations.ai/p/${encodeURIComponent(cleanPrompt)}?width=1080&height=1080&seed=${seed}&model=flux&nologo=true`;
