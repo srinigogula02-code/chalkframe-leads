@@ -35,7 +35,7 @@ export default async function AIAdRedesignsPage() {
       COUNT(*) FILTER (WHERE status='failed')::text AS failed, COALESCE(SUM(cost_usd),0)::text AS spend,
       AVG(latency_ms) FILTER (WHERE latency_ms IS NOT NULL)::text AS avg_latency_ms
       FROM lead_ad_redesign_runs GROUP BY requested_model ORDER BY SUM(cost_usd) DESC NULLS LAST, COUNT(*) DESC LIMIT 12`,
-    sql`SELECT id, lead_id, lead_title, status, requested_model, actual_model, source_image_url, redesign_image_url, cost_usd, latency_ms, error_message, created_at
+    sql`SELECT id, lead_id, lead_title, trigger, status, requested_model, actual_model, source_image_url, redesign_image_url, cost_usd, latency_ms, error_message, created_at
       FROM lead_ad_redesign_runs ORDER BY created_at DESC LIMIT 30`,
     getImageGenerationModels(),
     getOpenRouterCredits(),

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowUpRight, Bot, CheckCircle2, Clock3, Coins, FileText, Gauge, Image as ImageIcon, Sparkles, XCircle } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { AlertTriangle, ArrowUpRight, Bot, CheckCircle2, Clock3, Coins, FileText, Gauge, Image as ImageIcon, RefreshCw, Sparkles, Zap, XCircle } from "lucide-react";
 import { CurrencyCode, DEFAULT_USD_TO_INR, formatCurrency } from "@/lib/currency";
 import type { OpenRouterModelOption } from "@/lib/openrouter-models";
 import AdRedesignSettingsPanel, { type AIAdRedesignSettings } from "./settings-panel";
@@ -32,6 +33,7 @@ export type AdRedesignRunRow = {
   id: string;
   lead_id: string | null;
   lead_title: string | null;
+  trigger: string | null;
   status: string;
   requested_model: string;
   actual_model: string | null;
@@ -64,108 +66,99 @@ export default function AdRedesignDashboardClient({
   defaultPrompt: string;
   exchangeRate?: number;
 }) {
+  const router = useRouter();
   const [currency, setCurrency] = useState<CurrencyCode>("INR");
+  const hasProcessing = recentRuns.some(r => r.status === "processing");
 
+  // Auto-refresh dashboard when runs are in processing state
   useEffect(() => {
-    const saved = localStorage.getItem("chalkframe_dashboard_currency");
-    if (saved === "USD" || saved === "INR") {
-      setCurrency(saved);
-    }
-  }, []);
+    if (!hasProcessing) return;
+    const interval = setInterval(() => {
+      router.refresh();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [hasProcessing, router]);
 
-  function changeCurrency(newCode: CurrencyCode) {
-    setCurrency(newCode);
-    localStorage.setItem("chalkframe_dashboard_currency", newCode);
-  }
-
-  const monthlyBudget = Number(settings.monthly_budget_usd);
-  const monthSpend = Number(summary.month_spend);
-  const budgetPercent = monthlyBudget ? Math.min(100, Math.round((monthSpend / monthlyBudget) * 100)) : 0;
-  const accountRemaining =
-    credits.totalCredits !== null && credits.totalUsage !== null ? credits.totalCredits - credits.totalUsage : null;
+  const avgLatencySec = summary.avg_latency_ms ? (Number(summary.avg_latency_ms) / 1000).toFixed(1) : "—";
+  const activeModel = models.find(m => m.id === settings.model);
 
   return (
-    <section className="workspace ai-workspace">
-      <header className="topbar ai-topbar">
-        <div>
-          <span className="technical">Chalkframe / OpenRouter Multimodal</span>
-          <h1>AI Ad Creative Redesigns</h1>
-          <p>
-            Performance marketing ad creative redesigns, model controls, and auto-generation settings (1 USD = ₹
-            {exchangeRate.toFixed(2)}).
-          </p>
-        </div>
+    <section className="ai-workspace">
+      <header className="business-topbar ai-topbar">
+        <Link href="/dashboard" className="back-link">
+          <Bot size={17} /> Dashboard
+        </Link>
+        <img src="/brand/chalkframe-logo-dark.svg" alt="Chalkframe" />
         <div className="topbar-actions">
           <div className="currency-toggle-card">
-            <span className="currency-label">Currency</span>
+            <span className="currency-label">Currency:</span>
             <div className="currency-pill">
               <button
                 type="button"
                 className={currency === "INR" ? "active" : ""}
-                onClick={() => changeCurrency("INR")}
+                onClick={() => setCurrency("INR")}
               >
                 ₹ INR
               </button>
               <button
                 type="button"
                 className={currency === "USD" ? "active" : ""}
-                onClick={() => changeCurrency("USD")}
+                onClick={() => setCurrency("USD")}
               >
                 $ USD
               </button>
             </div>
           </div>
-          <a className="secondary-button" href="https://openrouter.ai/activity" target="_blank" rel="noreferrer">
-            Open OpenRouter <ArrowUpRight size={14} />
-          </a>
+          <button type="button" className="secondary-button" onClick={() => router.refresh()}>
+            <RefreshCw size={14} /> Refresh
+          </button>
         </div>
       </header>
 
       <section className="ai-health-strip">
         <article className={apiKeyConfigured ? "healthy" : "warning"}>
           <span>
-            {apiKeyConfigured ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}API key
+            <Coins size={14} /> OpenRouter Connection
           </span>
-          <strong>{apiKeyConfigured ? "Configured" : "Missing"}</strong>
-          <small>{apiKeyConfigured ? "Server-only credential available" : "Add OPENROUTER_API_KEY in .env.local / Vercel"}</small>
+          <strong>{apiKeyConfigured ? "Connected" : "Key missing"}</strong>
+          <small>
+            {credits.totalCredits !== null
+              ? `Balance: $${credits.totalCredits.toFixed(2)} USD`
+              : credits.error || "Valid OpenRouter API key configured."}
+          </small>
         </article>
 
-        <article>
+        <article className="healthy">
           <span>
-            <Coins size={16} />This month
+            <Gauge size={14} /> Month Spend Limit
           </span>
-          <strong>{formatCurrency(monthSpend, currency, 2, exchangeRate)}</strong>
-          <small>
-            {budgetPercent}% of {formatCurrency(monthlyBudget, currency, 2, exchangeRate)} budget
-          </small>
+          <strong>{formatCurrency(summary.month_spend, currency, 2, exchangeRate)}</strong>
+          <small>Monthly Budget: {formatCurrency(settings.monthly_budget_usd, currency, 2, exchangeRate)}</small>
           <i>
-            <b style={{ width: `${budgetPercent}%` }} />
+            <b
+              style={{
+                width: `${Math.min(100, Math.round((Number(summary.month_spend) / Math.max(0.01, Number(settings.monthly_budget_usd))) * 100))}%`,
+              }}
+            />
           </i>
         </article>
 
-        <article>
+        <article className="healthy">
           <span>
-            <Gauge size={16} />Average redesign
+            <Bot size={14} /> Active Model
           </span>
-          <strong>{formatCurrency(summary.avg_cost, currency, 4, exchangeRate)}</strong>
+          <strong title={settings.model}>{activeModel?.name || settings.model}</strong>
           <small>
-            {summary.avg_latency_ms
-              ? `${(Number(summary.avg_latency_ms) / 1000).toFixed(1)}s average generation`
-              : "No completed generations yet"}
+            {activeModel ? `${activeModel.id} · Image Generator` : "Configured via OpenRouter settings"}
           </small>
         </article>
 
-        <article>
+        <article className="healthy">
           <span>
-            <Bot size={16} />OpenRouter balance
+            <Clock3 size={14} /> Performance
           </span>
-          <strong>{accountRemaining === null ? "—" : formatCurrency(accountRemaining, currency, 2, exchangeRate)}</strong>
-          <small>
-            {credits.error ||
-              (credits.configured
-                ? `${formatCurrency(credits.totalUsage, currency, 2, exchangeRate)} account usage`
-                : "API key required")}
-          </small>
+          <strong>{avgLatencySec}s avg</strong>
+          <small>Per-image limit: {formatCurrency(settings.max_cost_usd, currency, 3, exchangeRate)}</small>
         </article>
       </section>
 
@@ -250,47 +243,120 @@ export default function AdRedesignDashboardClient({
         <section className="ai-run-list">
           <header>
             <div>
-              <span className="technical">Audit trail</span>
+              <span className="technical">Audit trail & Logs</span>
               <h2>Recent redesign generations</h2>
             </div>
-            <small>{summary.total_runs} total</small>
+            <small>{summary.total_runs} total runs</small>
           </header>
           {recentRuns.length ? (
-            <div>
-              {recentRuns.map(run => (
-                <article key={run.id} className="ad-redesign-run-card">
-                  <i className={`run-dot ${run.status}`} />
-                  <div>
-                    <strong>{run.lead_title || "Deleted business"}</strong>
-                    <span>{run.actual_model || run.requested_model}</span>
-                    <div className="run-image-comparison">
-                      {run.source_image_url && (
-                        <a href={run.source_image_url} target="_blank" rel="noreferrer" title="Original Creative">
-                          <img src={run.source_image_url} alt="Original" />
-                        </a>
-                      )}
-                      {run.redesign_image_url && (
-                        <a href={run.redesign_image_url} target="_blank" rel="noreferrer" title="AI Redesign Creative">
-                          <img src={run.redesign_image_url} alt="Redesign" />
-                        </a>
-                      )}
+            <div className="run-card-list">
+              {recentRuns.map(run => {
+                const isProcessing = run.status === "processing";
+                const isCompleted = run.status === "completed";
+                const isFailed = run.status === "failed";
+                const isBlocked = run.status === "blocked";
+
+                return (
+                  <article key={run.id} className={`ad-redesign-run-card ${run.status}`}>
+                    <header className="run-card-header">
+                      <div className="run-header-left">
+                        {isProcessing && (
+                          <span className="run-status-badge processing">
+                            <Clock3 size={12} className="spin-icon" /> Processing image…
+                          </span>
+                        )}
+                        {isCompleted && (
+                          <span className="run-status-badge completed">
+                            <CheckCircle2 size={12} /> Completed & Saved
+                          </span>
+                        )}
+                        {isFailed && (
+                          <span className="run-status-badge failed">
+                            <XCircle size={12} /> Generation Failed
+                          </span>
+                        )}
+                        {isBlocked && (
+                          <span className="run-status-badge blocked">
+                            <AlertTriangle size={12} /> Budget Blocked
+                          </span>
+                        )}
+                        <span className="run-trigger-pill">
+                          {run.trigger === "automatic" ? (
+                            <>
+                              <Zap size={11} /> Auto-Redesign
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles size={11} /> Manual Action
+                            </>
+                          )}
+                        </span>
+                      </div>
+                      <span className="run-time-stamp">
+                        {new Date(run.created_at).toLocaleString("en-IN", {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })}
+                      </span>
+                    </header>
+
+                    <div className="run-body">
+                      <div className="run-details">
+                        <strong className="run-lead-title">{run.lead_title || "Deleted business record"}</strong>
+                        <span className="run-model-name" title={run.actual_model || run.requested_model}>
+                          Model: <code>{run.actual_model || run.requested_model}</code>
+                        </span>
+                        <div className="run-meta-row">
+                          {run.latency_ms !== null && <span>⏱️ {(run.latency_ms / 1000).toFixed(1)}s</span>}
+                          {run.cost_usd !== null && <span>💰 {formatCurrency(run.cost_usd, currency, 4, exchangeRate)}</span>}
+                          {run.lead_id && (
+                            <Link href={`/dashboard/leads/${run.lead_id}`} className="run-lead-link">
+                              Open Business Workspace <ArrowUpRight size={12} />
+                            </Link>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Visual Side-by-Side Image Comparison */}
+                      <div className="run-images-box">
+                        {run.source_image_url && (
+                          <div className="run-img-wrapper">
+                            <span className="img-tag original">Original Ad</span>
+                            <a href={run.source_image_url} target="_blank" rel="noreferrer" title="Original Creative">
+                              <img src={run.source_image_url} alt="Original Ad Creative" loading="lazy" />
+                            </a>
+                          </div>
+                        )}
+                        {run.redesign_image_url && (
+                          <div className="run-img-wrapper">
+                            <span className="img-tag redesign">AI Redesign</span>
+                            <a href={run.redesign_image_url} target="_blank" rel="noreferrer" title="AI Redesign Creative">
+                              <img src={run.redesign_image_url} alt="AI Redesign Creative" loading="lazy" />
+                            </a>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    {run.error_message && <small title={run.error_message}>{run.error_message}</small>}
-                  </div>
-                  <aside>
-                    <b>{run.cost_usd === null ? "—" : formatCurrency(run.cost_usd, currency, 4, exchangeRate)}</b>
-                    <span>
-                      {new Date(run.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
-                    </span>
-                    {run.lead_id && <Link href={`/dashboard/leads/${run.lead_id}`}>Open Business</Link>}
-                  </aside>
-                </article>
-              ))}
+
+                    {/* Detailed Diagnostic Log Box for Errors or Blocked Execution */}
+                    {(run.error_message || isFailed || isBlocked) && (
+                      <div className={`run-error-box ${isBlocked ? "blocked" : ""}`}>
+                        <AlertTriangle size={15} />
+                        <div>
+                          <strong>{isBlocked ? "Budget Limit Enforced" : "Diagnostic Error Log"}</strong>
+                          <p>{run.error_message || "The redesign generation attempt failed before completion."}</p>
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
             </div>
           ) : (
             <div className="ai-empty">
               <FileText size={24} />
               <strong>No ad redesign history</strong>
+              <span>Generations and audit logs will appear here.</span>
             </div>
           )}
         </section>
