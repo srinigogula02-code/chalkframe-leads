@@ -12,7 +12,8 @@ import { uploadLeadImage } from "@/lib/r2";
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const ALLOWED_FORMATS = new Set(["jpeg", "png", "webp", "gif", "avif", "tiff"]);
 
-type QueueRow = { id: string; url: string };
+type QueueRow = { id: string; url: string; collage_source_image_id?: string | null };
+type OriginalImageMap = Map<string, { id: string; url: string }>;
 
 function isPrivateIpv4(address: string) {
   const parts = address.split(".").map(Number);
@@ -97,39 +98,71 @@ async function markFailed(ids: string[], message: string) {
 }
 
 export async function processCollageQueue(leadId: string) {
-  const selection = await sql`SELECT i.id, i.url FROM leads l JOIN lead_images i ON i.id=l.collage_original_image_id AND i.lead_id=l.id WHERE l.id=${leadId}`;
-  if (!selection[0]) {
+  // Fetch all available original ad creative images for this lead
+  const [allOriginals, leadRow] = await Promise.all([
+    sql`SELECT id, url FROM lead_images WHERE lead_id=${leadId} ORDER BY position ASC, created_at ASC`,
+    sql`SELECT id, collage_original_image_id FROM leads WHERE id=${leadId}`,
+  ]);
+
+  if (!allOriginals.length) {
     await sql`UPDATE redesign_images SET collage_status='waiting', collage_error=NULL, collage_started_at=NULL WHERE lead_id=${leadId} AND collage_status IN ('queued','processing')`;
     return;
   }
-  const claimed = await sql`UPDATE redesign_images SET collage_status='processing', collage_error=NULL, collage_started_at=now()
+
+  const originalMap: OriginalImageMap = new Map();
+  allOriginals.forEach(img => originalMap.set(String(img.id), { id: String(img.id), url: String(img.url) }));
+
+  const defaultOriginal = (leadRow[0]?.collage_original_image_id && originalMap.get(String(leadRow[0].collage_original_image_id))) || originalMap.values().next().value;
+
+  const claimed = (await sql`UPDATE redesign_images 
+    SET collage_status='processing', collage_error=NULL, collage_started_at=now()
     WHERE lead_id=${leadId} AND collage_status='queued'
-    RETURNING id, url` as QueueRow[];
+    RETURNING id, url, collage_source_image_id`) as QueueRow[];
+
   if (!claimed.length) return;
-  let originalBytes: Uint8Array;
-  try { originalBytes = await fetchImage(String(selection[0].url)); }
-  catch (error) { await markFailed(claimed.map(row => row.id), error instanceof Error ? `Original creative: ${error.message}` : "Original creative could not be loaded."); return; }
+
+  // Cache fetched original image bytes so we don't re-download the same original multiple times
+  const originalBytesCache = new Map<string, Uint8Array>();
+
+  async function getOriginalBytes(sourceId: string, sourceUrl: string): Promise<Uint8Array> {
+    if (originalBytesCache.has(sourceId)) {
+      return originalBytesCache.get(sourceId)!;
+    }
+    const bytes = await fetchImage(sourceUrl);
+    originalBytesCache.set(sourceId, bytes);
+    return bytes;
+  }
 
   let cursor = 0;
   const workers = Array.from({ length: Math.min(3, claimed.length) }, async () => {
     while (cursor < claimed.length) {
       const row = claimed[cursor++];
       try {
+        // Match specific original creative paired with this redesign, or fallback to lead default original
+        const targetOriginal = (row.collage_source_image_id && originalMap.get(String(row.collage_source_image_id))) || defaultOriginal;
+
+        const originalBytes = await getOriginalBytes(targetOriginal.id, targetOriginal.url);
         const redesignBytes = await fetchImage(row.url);
         const collage = await createComparisonCollage(originalBytes, redesignBytes);
-        const version = createHash("sha256").update(`${selection[0].id}\n${selection[0].url}\n${row.url}`).digest("hex").slice(0, 16);
+        
+        const version = createHash("sha256").update(`${targetOriginal.id}\n${targetOriginal.url}\n${row.url}`).digest("hex").slice(0, 16);
         const now = new Date();
         const key = `leads/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/collages/${leadId}/${row.id}-${version}.png`;
         const collageUrl = await uploadLeadImage({ key, bytes: collage, contentType: "image/png" });
-        await sql`UPDATE redesign_images r SET collage_url=${collageUrl}, collage_status='completed', collage_error=NULL,
-          collage_source_image_id=${String(selection[0].id)}, collage_source_redesign_url=${row.url}, collage_completed_at=now(), collage_started_at=NULL
-          FROM leads l WHERE r.id=${row.id} AND r.lead_id=${leadId} AND r.lead_id=l.id AND r.url=${row.url} AND l.collage_original_image_id=${String(selection[0].id)} AND r.collage_status='processing'`;
+
+        await sql`UPDATE redesign_images 
+          SET collage_url=${collageUrl}, collage_status='completed', collage_error=NULL,
+              collage_source_image_id=${targetOriginal.id}, collage_source_redesign_url=${row.url}, 
+              collage_completed_at=now(), collage_started_at=NULL
+          WHERE id=${row.id} AND lead_id=${leadId} AND collage_status='processing'`;
       } catch (error) {
         await markFailed([row.id], error instanceof Error ? error.message : "The collage could not be created.");
       }
     }
   });
+
   await Promise.all(workers);
+
   try {
     const queued = await queueEmailDraftsForLead(leadId);
     if (queued.queued > 0) await processEmailDraftQueue(leadId);
