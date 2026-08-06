@@ -3,6 +3,7 @@ import { after, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { processCollageQueue } from "@/lib/collage";
 import { sql } from "@/lib/db";
+import { processEmailDraftQueue, queueEmailDraftsForLead } from "@/lib/openrouter-email";
 import { isWorkflowStatus } from "@/lib/workflow";
 
 const clean = (value: unknown, max: number) => String(value ?? "").trim().slice(0, max);
@@ -10,20 +11,22 @@ const validUrl = (value: string) => { try { return ["http:", "https:"].includes(
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type SavedImage = {
-  id: string; url: string; description: string | null; collage_url: string | null;
-  collage_status: "waiting" | "queued" | "processing" | "completed" | "failed"; collage_error: string | null;
+  id: string; url: string; description: string | null; collageUrl: string | null;
+  collageStatus: "waiting" | "queued" | "processing" | "completed" | "failed"; collageError: string | null;
 };
 type ParsedImage = { id:string; suppliedId:string; url:string; description:string; position:number };
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getSession();
   if (!user || user.role !== "admin") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
+  const queued = await queueEmailDraftsForLead(id).catch(() => ({ queued: 0 }));
   const rows = await sql`SELECT l.collage_original_image_id,
-    COALESCE(json_agg(json_build_object('id', r.id, 'url', r.url, 'description', r.description, 'collageUrl', r.collage_url, 'collageStatus', CASE WHEN r.collage_status='processing' AND r.collage_started_at < now() - interval '2 minutes' THEN 'failed' ELSE r.collage_status END, 'collageError', CASE WHEN r.collage_status='processing' AND r.collage_started_at < now() - interval '2 minutes' THEN 'Background generation timed out. Retry the collage.' ELSE r.collage_error END) ORDER BY r.position) FILTER (WHERE r.id IS NOT NULL), '[]') AS redesign_images
-    FROM leads l LEFT JOIN redesign_images r ON r.lead_id=l.id WHERE l.id=${id} GROUP BY l.id`;
+    COALESCE(json_agg(json_build_object('id', r.id, 'url', r.url, 'description', r.description, 'collageUrl', r.collage_url, 'collageStatus', CASE WHEN r.collage_status='processing' AND r.collage_started_at < now() - interval '2 minutes' THEN 'failed' ELSE r.collage_status END, 'collageError', CASE WHEN r.collage_status='processing' AND r.collage_started_at < now() - interval '2 minutes' THEN 'Background generation timed out. Retry the collage.' ELSE r.collage_error END, 'emailDraft', CASE WHEN d.id IS NULL THEN NULL ELSE json_build_object('id', d.id, 'status', CASE WHEN d.status='processing' AND d.started_at < now() - interval '5 minutes' THEN 'failed' ELSE d.status END, 'subject', d.subject, 'body', d.body, 'reviewReason', d.review_reason, 'error', CASE WHEN d.status='processing' AND d.started_at < now() - interval '5 minutes' THEN 'Background generation timed out. Regenerate the email.' ELSE d.error_message END, 'model', COALESCE(d.actual_model, d.requested_model), 'costUsd', d.cost_usd, 'latencyMs', d.latency_ms, 'recipientEmail', d.recipient_email, 'updatedAt', d.updated_at) END) ORDER BY r.position) FILTER (WHERE r.id IS NOT NULL), '[]') AS redesign_images
+    FROM leads l LEFT JOIN redesign_images r ON r.lead_id=l.id LEFT JOIN lead_email_drafts d ON d.redesign_image_id=r.id WHERE l.id=${id} GROUP BY l.id`;
   if (!rows[0]) return NextResponse.json({ error: "Business not found." }, { status: 404 });
+  if (queued.queued > 0) after(() => processEmailDraftQueue(id));
   return NextResponse.json({ collageOriginalImageId: rows[0].collage_original_image_id, redesignImages: rows[0].redesign_images });
 }
 
@@ -94,8 +97,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   FROM updated LEFT JOIN upserted ON true GROUP BY updated.id, updated.workflow_status, updated.collage_original_image_id`;
   if (!result[0]) return NextResponse.json({ error: "Business not found." }, { status: 404 });
   const savedImages = result[0].redesign_images as SavedImage[];
-  if (savedImages.some(image => image.collage_status === "queued")) after(() => processCollageQueue(id));
-  return NextResponse.json({ saved: true, workflowStatus: result[0].workflow_status, collageOriginalImageId: result[0].collage_original_image_id, redesignImages: savedImages, collageQueued: savedImages.some(image => image.collage_status === "queued") });
+  if (savedImages.some(image => image.collageStatus === "queued")) after(() => processCollageQueue(id));
+  return NextResponse.json({ saved: true, workflowStatus: result[0].workflow_status, collageOriginalImageId: result[0].collage_original_image_id, redesignImages: savedImages, collageQueued: savedImages.some(image => image.collageStatus === "queued") });
 }
 
 export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {

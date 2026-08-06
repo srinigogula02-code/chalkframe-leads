@@ -6,6 +6,7 @@ import { isIP } from "node:net";
 import sharp from "sharp";
 import { createComparisonCollage } from "@/lib/collage-image";
 import { sql } from "@/lib/db";
+import { processEmailDraftQueue, queueEmailDraftsForLead } from "@/lib/openrouter-email";
 import { uploadLeadImage } from "@/lib/r2";
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -129,4 +130,10 @@ export async function processCollageQueue(leadId: string) {
     }
   });
   await Promise.all(workers);
+  try {
+    const queued = await queueEmailDraftsForLead(leadId);
+    if (queued.queued > 0) await processEmailDraftQueue(leadId);
+  } catch (error) {
+    console.error("Email draft queue failed after collage generation", { leadId, error });
+  }
 }
