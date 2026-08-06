@@ -38,7 +38,6 @@ function ModelSelectorField({
   placeholder?: string;
 }) {
   const imageGenModels = useMemo(() => models.filter(m => m.isImageGeneration), [models]);
-  const visionModels = useMemo(() => models.filter(m => m.isVision && !m.isImageGeneration), [models]);
 
   const [customMode, setCustomMode] = useState(() => {
     return Boolean(value && !models.some(m => m.id === value));
@@ -75,18 +74,9 @@ function ModelSelectorField({
           onChange={e => onChange(e.target.value)}
           className="ai-model-select"
         >
-          {!value && <option value="">-- Choose an OpenRouter image model --</option>}
-          {imageGenModels.length > 0 && (
-            <optgroup label={`🎨 Image Generation Models (${imageGenModels.length} available - Recommended)`}>
-              {imageGenModels.map(m => (
-                <option key={m.id} value={m.id}>
-                  {m.name} ({m.id}) — {formatPerMillion(m.promptPrice, currency, exchangeRate)} in / {formatPerMillion(m.completionPrice, currency, exchangeRate)} out
-                </option>
-              ))}
-            </optgroup>
-          )}
-          <optgroup label={`📷 Multimodal Vision Models (${visionModels.length} available)`}>
-            {visionModels.map(m => (
+          {!value && <option value="">-- Choose an OpenRouter image generation model --</option>}
+          <optgroup label={`🎨 Image Generation Models (${imageGenModels.length} available)`}>
+            {imageGenModels.map(m => (
               <option key={m.id} value={m.id}>
                 {m.name} ({m.id}) — {formatPerMillion(m.promptPrice, currency, exchangeRate)} in / {formatPerMillion(m.completionPrice, currency, exchangeRate)} out
               </option>
@@ -97,10 +87,10 @@ function ModelSelectorField({
 
       <small>
         {selectedModel
-          ? `${selectedModel.name} (${selectedModel.id}) ${selectedModel.isImageGeneration ? "· 🎨 Direct Image Generation" : "· 📷 Multimodal Vision"} · ${formatPerMillion(selectedModel.promptPrice, currency, exchangeRate)} in · ${formatPerMillion(selectedModel.completionPrice, currency, exchangeRate)} out`
+          ? `${selectedModel.name} (${selectedModel.id}) · 🎨 Image Generation Model · ${formatPerMillion(selectedModel.promptPrice, currency, exchangeRate)} in · ${formatPerMillion(selectedModel.completionPrice, currency, exchangeRate)} out`
           : value
           ? `Custom model ID: ${value}`
-          : `Choose from ${models.length} image-generation and vision models.`}
+          : `Choose from ${imageGenModels.length} image generation models.`}
       </small>
     </div>
   );
@@ -172,7 +162,7 @@ export default function AdRedesignSettingsPanel({
         <div>
           <span className="technical">Generation controls</span>
           <h2>AI Ad Creative Redesign Settings</h2>
-          <p>Configure OpenRouter models, auto-redesign triggers, performance-marketing prompts, and cost safety guards.</p>
+          <p>Configure image generation models, auto-redesign triggers, performance-marketing prompts, and cost safety guards.</p>
         </div>
         <div className="header-toggle-actions">
           <button
@@ -226,7 +216,7 @@ export default function AdRedesignSettingsPanel({
           models={models}
           currency={currency}
           exchangeRate={exchangeRate}
-          placeholder="e.g. openai/gpt-4o-mini"
+          placeholder="e.g. black-forest-labs/flux-1-schnell"
         />
 
         <label>

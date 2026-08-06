@@ -49,7 +49,7 @@ export async function getOpenRouterModels(): Promise<OpenRouterModelOption[]> {
 
         const isImageGeneration = Boolean(
           outputs.includes("image") ||
-          /flux|recraft|sdxl|stable-diffusion|dall-e|imagen|midjourney|ideogram|playground|image-2|image-preview/i.test(id || name)
+          /flux|recraft|sdxl|stable-diffusion|dall-e|imagen|midjourney|ideogram|playground|image-2|image-preview|-image/i.test(id || name)
         );
 
         const isVision = Boolean(
@@ -70,11 +70,7 @@ export async function getOpenRouterModels(): Promise<OpenRouterModelOption[]> {
           isImageGeneration,
         };
       })
-      .sort((a, b) => {
-        if (a.isImageGeneration !== b.isImageGeneration) return a.isImageGeneration ? -1 : 1;
-        if (a.isVision !== b.isVision) return a.isVision ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      });
+      .sort((a, b) => a.name.localeCompare(b.name));
   } catch {
     return [];
   }
@@ -87,12 +83,40 @@ export async function getVisionModels(): Promise<OpenRouterModelOption[]> {
 
 export async function getImageGenerationModels(): Promise<OpenRouterModelOption[]> {
   const all = await getOpenRouterModels();
-  return all
-    .filter(m => m.isImageGeneration || m.isVision)
-    .sort((a, b) => {
-      if (a.isImageGeneration !== b.isImageGeneration) return a.isImageGeneration ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
+  const strictImageGen = all.filter(m => m.isImageGeneration);
+
+  const curatedImageGenList: Array<{ id: string; name: string }> = [
+    { id: "google/gemini-2.5-flash-image", name: "Google: Gemini 2.5 Flash Image" },
+    { id: "google/gemini-3.1-flash-image", name: "Google: Gemini 3.1 Flash Image" },
+    { id: "google/gemini-3-pro-image", name: "Google: Gemini 3 Pro Image" },
+    { id: "openai/gpt-5-image", name: "OpenAI: GPT-5 Image" },
+    { id: "openai/dall-e-3", name: "OpenAI: DALL-E 3" },
+    { id: "black-forest-labs/flux-1-schnell", name: "Flux 1 Schnell (Black Forest Labs)" },
+    { id: "recraft-ai/recraft-20b", name: "ReCraft 20B Vector & Raster" },
+    { id: "stabilityai/stable-diffusion-3.5-large", name: "Stable Diffusion 3.5 Large" },
+    { id: "openrouter/auto", name: "Auto Router (Image Generation)" },
+  ];
+
+  const map = new Map<string, OpenRouterModelOption>();
+  strictImageGen.forEach(m => map.set(m.id, m));
+
+  curatedImageGenList.forEach(p => {
+    if (!map.has(p.id)) {
+      map.set(p.id, {
+        id: p.id,
+        name: p.name,
+        contextLength: 4096,
+        promptPrice: 0.005,
+        completionPrice: 0.005,
+        imagePrice: 0.005,
+        expirationDate: null,
+        isVision: true,
+        isImageGeneration: true,
+      });
+    }
+  });
+
+  return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function getOpenRouterCredits() {
