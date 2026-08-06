@@ -113,52 +113,78 @@ export async function generateAdRedesign({
     let actualCostUsd: number | null = null;
     let lastErrorMsg = "";
 
-    // Tier 1: Dedicated OpenRouter Image Generation API (/api/v1/images)
+    // Tier 1: Dedicated OpenRouter Image Generation API (/api/v1/images) with auto-fallback payloads
     try {
-      const imgApiRes = await fetch("https://openrouter.ai/api/v1/images", {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${apiKey}`,
-          "content-type": "application/json",
-          "HTTP-Referer": "https://chalkframe.work",
-          "X-Title": "Chalkframe Performance Ad Redesign",
-        },
-        body: JSON.stringify({
+      const attempts = [
+        // Attempt A: Standard aspect ratio 3:4, include input_references for non-OpenAI models
+        {
           model: openRouterModel,
           prompt: promptText,
-          aspect_ratio: "4:5",
-          input_references: [
-            {
-              type: "image_url",
-              image_url: { url: processedSource.url },
-            },
-          ],
-        }),
-        signal: AbortSignal.timeout(90_000),
-      });
+          aspect_ratio: "3:4",
+          ...(!openRouterModel.startsWith("openai/")
+            ? {
+                input_references: [
+                  {
+                    type: "image_url",
+                    image_url: { url: processedSource.url },
+                  },
+                ],
+              }
+            : {}),
+        },
+        // Attempt B: Square aspect ratio 1:1
+        {
+          model: openRouterModel,
+          prompt: promptText,
+          aspect_ratio: "1:1",
+        },
+        // Attempt C: Minimal payload (prompt only)
+        {
+          model: openRouterModel,
+          prompt: promptText,
+        },
+      ];
 
-      if (imgApiRes.ok) {
-        const payload = (await imgApiRes.json()) as {
-          data?: Array<{ b64_json?: string; url?: string; media_type?: string }>;
-          usage?: { cost?: number };
-        };
-        if (typeof payload.usage?.cost === "number" && payload.usage.cost > 0) {
-          actualCostUsd = payload.usage.cost;
-        }
+      for (const attemptBody of attempts) {
+        if (finalRedesignBytes || rawImageOutput) break;
 
-        const first = payload.data?.[0];
-        if (first?.b64_json) {
-          const candidate = Buffer.from(first.b64_json, "base64");
-          if (await isValidImageBuffer(candidate)) {
-            finalRedesignBytes = candidate;
+        const imgApiRes = await fetch("https://openrouter.ai/api/v1/images", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${apiKey}`,
+            "content-type": "application/json",
+            "HTTP-Referer": "https://chalkframe.work",
+            "X-Title": "Chalkframe Performance Ad Redesign",
+          },
+          body: JSON.stringify(attemptBody),
+          signal: AbortSignal.timeout(90_000),
+        });
+
+        if (imgApiRes.ok) {
+          const payload = (await imgApiRes.json()) as {
+            data?: Array<{ b64_json?: string; url?: string; media_type?: string }>;
+            usage?: { cost?: number };
+          };
+          if (typeof payload.usage?.cost === "number" && payload.usage.cost > 0) {
+            actualCostUsd = payload.usage.cost;
           }
-        } else if (first?.url) {
-          rawImageOutput = first.url;
+
+          const first = payload.data?.[0];
+          if (first?.b64_json) {
+            const candidate = Buffer.from(first.b64_json, "base64");
+            if (await isValidImageBuffer(candidate)) {
+              finalRedesignBytes = candidate;
+              break;
+            }
+          } else if (first?.url) {
+            rawImageOutput = first.url;
+            break;
+          }
+        } else {
+          const errText = await imgApiRes.text();
+          lastErrorMsg = `OpenRouter Image API (${openRouterModel}) returned status ${imgApiRes.status}: ${errText.slice(0, 250)}`;
+          console.warn(lastErrorMsg);
         }
-      } else {
-        const errText = await imgApiRes.text();
-        lastErrorMsg = `OpenRouter Image API (${openRouterModel}) returned status ${imgApiRes.status}: ${errText.slice(0, 250)}`;
-        console.warn(lastErrorMsg);
       }
     } catch (imgApiErr) {
       lastErrorMsg = imgApiErr instanceof Error ? imgApiErr.message : "Dedicated Image API call failed.";
