@@ -18,6 +18,15 @@ type AdRedesignSettings = {
   system_prompt_override: string | null;
 };
 
+async function isValidImageBuffer(buffer: Buffer): Promise<boolean> {
+  try {
+    const meta = await sharp(buffer).metadata();
+    return Boolean(meta.format && ["jpeg", "png", "webp", "gif", "avif", "tiff"].includes(meta.format));
+  } catch {
+    return false;
+  }
+}
+
 export async function generateAdRedesign({
   leadId,
   sourceImageUrl,
@@ -149,17 +158,24 @@ export async function generateAdRedesign({
 
     let finalRedesignBytes: Buffer | null = null;
 
-    // If OpenRouter model returned a direct base64 image or URL:
+    // Validate if OpenRouter model returned a direct base64 image or image URL:
     if (rawImageOutput.startsWith("data:image/")) {
       const matches = rawImageOutput.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
       if (matches) {
-        finalRedesignBytes = Buffer.from(matches[2], "base64");
+        const candidate = Buffer.from(matches[2], "base64");
+        if (await isValidImageBuffer(candidate)) {
+          finalRedesignBytes = candidate;
+        }
       }
     } else if (rawImageOutput.startsWith("http")) {
       try {
-        const imgRes = await fetch(rawImageOutput, { signal: AbortSignal.timeout(20_000) });
-        if (imgRes.ok) {
-          finalRedesignBytes = Buffer.from(await imgRes.arrayBuffer());
+        const imgRes = await fetch(rawImageOutput, { signal: AbortSignal.timeout(25_000) });
+        const cType = imgRes.headers.get("content-type") || "";
+        if (imgRes.ok && (cType.startsWith("image/") || cType.includes("octet-stream"))) {
+          const candidate = Buffer.from(await imgRes.arrayBuffer());
+          if (await isValidImageBuffer(candidate)) {
+            finalRedesignBytes = candidate;
+          }
         }
       } catch (err) {
         console.warn("Could not download image from rawImageOutput URL:", err);
@@ -168,14 +184,21 @@ export async function generateAdRedesign({
 
     // Fallback Image Generation Engine: Render high quality visual ad creative via Flux
     if (!finalRedesignBytes) {
-      console.log("Rendering performance marketing ad creative image via Flux fallback engine...");
+      console.log("LLM returned text/non-image response. Rendering performance marketing ad creative image via Flux fallback engine...");
       const seed = Math.floor(Math.random() * 1_000_000);
       const cleanPrompt = `Modern uncluttered Instagram ad creative for ${leadTitle}, sleek performance marketing aesthetic, elegant typography, premium product photography, 4:5 ratio, high contrast visual hierarchy`;
       const fluxUrl = `https://pollinations.ai/p/${encodeURIComponent(cleanPrompt)}?width=1080&height=1080&seed=${seed}&model=flux&nologo=true`;
 
       const fluxRes = await fetch(fluxUrl, { signal: AbortSignal.timeout(40_000) });
       if (!fluxRes.ok) throw new Error("Could not generate redesign image file.");
-      finalRedesignBytes = Buffer.from(await fluxRes.arrayBuffer());
+      const candidate = Buffer.from(await fluxRes.arrayBuffer());
+      if (await isValidImageBuffer(candidate)) {
+        finalRedesignBytes = candidate;
+      }
+    }
+
+    if (!finalRedesignBytes) {
+      throw new Error("Could not produce a valid image format for performance ad creative redesign.");
     }
 
     // Compress & convert generated image to WebP with sharp
