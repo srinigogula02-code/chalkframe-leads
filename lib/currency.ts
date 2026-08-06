@@ -1,5 +1,3 @@
-import "server-only";
-
 export type CurrencyCode = "INR" | "USD";
 
 export const DEFAULT_USD_TO_INR = 95.1341;
