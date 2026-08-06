@@ -183,12 +183,27 @@ export async function generateAdRedesign({
     const latencyMs = Date.now() - startTime;
     const estimatedCostUsd = 0.005;
 
+    // Ensure lead has a selected original creative for collages
+    let targetOriginalId = sourceImageId || null;
+    if (!targetOriginalId) {
+      const origRows = await sql`SELECT collage_original_image_id FROM leads WHERE id=${leadId}`;
+      targetOriginalId = origRows[0]?.collage_original_image_id ? String(origRows[0].collage_original_image_id) : null;
+    }
+    if (!targetOriginalId) {
+      const firstOrig = await sql`SELECT id FROM lead_images WHERE lead_id=${leadId} ORDER BY position ASC LIMIT 1`;
+      if (firstOrig[0]) targetOriginalId = String(firstOrig[0].id);
+    }
+
+    if (targetOriginalId) {
+      await sql`UPDATE leads SET collage_original_image_id=${targetOriginalId}, updated_at=now() WHERE id=${leadId} AND collage_original_image_id IS NULL`;
+    }
+
     // Save new redesign image entry into business workspace (redesign_images)
     const posRow = await sql`SELECT COALESCE(MAX(position), 0) + 1 AS pos FROM redesign_images WHERE lead_id=${leadId}`;
     const nextPos = Number(posRow[0]?.pos || 1);
 
     const redesignInsert = await sql`INSERT INTO redesign_images (lead_id, url, description, position, collage_status, collage_source_image_id, collage_requested_at)
-      VALUES (${leadId}, ${finalRedesignUrl}, 'AI Performance Marketing Redesign', ${nextPos}, 'queued', ${sourceImageId || null}, now())
+      VALUES (${leadId}, ${finalRedesignUrl}, 'AI Performance Marketing Redesign', ${nextPos}, 'queued', ${targetOriginalId}, now())
       RETURNING id, url, description, collage_status`;
 
     const redesignId = String(redesignInsert[0].id);

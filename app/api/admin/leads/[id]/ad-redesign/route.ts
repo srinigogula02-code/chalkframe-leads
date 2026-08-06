@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { processCollageQueue } from "@/lib/collage";
 import { sql } from "@/lib/db";
 import { generateAdRedesign } from "@/lib/openrouter-ad-redesign";
 
@@ -37,6 +38,7 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     if (!results.length) {
       return NextResponse.json({ error: "Failed to generate redesigns for business ad creatives." }, { status: 500 });
     }
+    after(() => processCollageQueue(leadId));
     return NextResponse.json({ ok: true, count: results.length, redesigns: results });
   }
 
@@ -69,6 +71,7 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
       sourceImageId,
       trigger: "manual",
     });
+    after(() => processCollageQueue(leadId));
     return NextResponse.json({ ok: true, redesign: result });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Ad redesign generation failed." }, { status: 500 });
