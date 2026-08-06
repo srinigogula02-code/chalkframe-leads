@@ -27,6 +27,17 @@ async function isValidImageBuffer(buffer: Buffer): Promise<boolean> {
   }
 }
 
+function normalizeOpenRouterModelSlug(modelSlug: string): string {
+  const trimmed = modelSlug.trim();
+  if (/gpt-5\.4-image-2|gpt-5-image-2|openai\/gpt-5\.4-image-2/i.test(trimmed)) {
+    return "openai/gpt-image-2";
+  }
+  if (/gpt-5\.4-image|gpt-5-image|openai\/gpt-5\.4-image/i.test(trimmed)) {
+    return "openai/gpt-image-1";
+  }
+  return trimmed;
+}
+
 function getModelImageCost(modelId: string): number {
   const id = modelId.toLowerCase();
   if (id.includes("gpt-image-2") || id.includes("gpt-5.4-image-2")) return 0.13;
@@ -83,18 +94,20 @@ export async function generateAdRedesign({
   const processedSource = await processAdCreativeImage(sourceImageUrl);
   const promptText = getEffectiveAdRedesignPrompt(settings.system_prompt_override);
 
-  const targetModel = settings.model || "google/gemini-2.5-flash-image";
+  const rawTargetModel = settings.model || "google/gemini-2.5-flash-image";
+  const openRouterModel = normalizeOpenRouterModelSlug(rawTargetModel);
 
   const runRows = await sql`INSERT INTO lead_ad_redesign_runs (lead_id, source_image_id, source_image_url, lead_title, trigger, status, requested_model, prompt_used)
-    VALUES (${leadId}, ${sourceImageId || null}, ${processedSource.url}, ${leadTitle}, ${trigger}, 'processing', ${targetModel}, ${promptText})
+    VALUES (${leadId}, ${sourceImageId || null}, ${processedSource.url}, ${leadTitle}, ${trigger}, 'processing', ${rawTargetModel}, ${promptText})
     RETURNING id`;
   const runId = String(runRows[0].id);
 
   try {
     let rawImageOutput = "";
-    let actualModelName = targetModel;
+    let actualModelName = openRouterModel;
     let finalRedesignBytes: Buffer | null = null;
     let actualCostUsd: number | null = null;
+    let lastErrorMsg = "";
 
     // Tier 1: Dedicated OpenRouter Image Generation API (/api/v1/images)
     try {
@@ -107,7 +120,7 @@ export async function generateAdRedesign({
           "X-Title": "Chalkframe Performance Ad Redesign",
         },
         body: JSON.stringify({
-          model: targetModel,
+          model: openRouterModel,
           prompt: promptText,
           aspect_ratio: "4:5",
           output_format: "webp",
@@ -141,10 +154,12 @@ export async function generateAdRedesign({
         }
       } else {
         const errText = await imgApiRes.text();
-        console.warn(`Dedicated Image API (${targetModel}) returned status ${imgApiRes.status}:`, errText.slice(0, 200));
+        lastErrorMsg = `OpenRouter Image API (${openRouterModel}) returned status ${imgApiRes.status}: ${errText.slice(0, 250)}`;
+        console.warn(lastErrorMsg);
       }
     } catch (imgApiErr) {
-      console.warn(`Dedicated Image API call to ${targetModel} failed:`, imgApiErr);
+      lastErrorMsg = imgApiErr instanceof Error ? imgApiErr.message : "Dedicated Image API call failed.";
+      console.warn(`Dedicated Image API call to ${openRouterModel} failed:`, imgApiErr);
     }
 
     // Tier 2: OpenRouter Multimodal Chat Completions API (/api/v1/chat/completions)
@@ -159,7 +174,7 @@ export async function generateAdRedesign({
             "X-Title": "Chalkframe Performance Ad Redesign",
           },
           body: JSON.stringify({
-            model: targetModel,
+            model: openRouterModel,
             messages: [
               {
                 role: "user",
@@ -220,9 +235,13 @@ export async function generateAdRedesign({
               }
             }
           }
+        } else {
+          const errText = await response.text();
+          lastErrorMsg = `OpenRouter Chat API (${openRouterModel}) returned status ${response.status}: ${errText.slice(0, 250)}`;
         }
       } catch (chatErr) {
-        console.warn(`Chat completions call to ${targetModel} failed:`, chatErr);
+        lastErrorMsg = chatErr instanceof Error ? chatErr.message : "Chat completions call failed.";
+        console.warn(`Chat completions call to ${openRouterModel} failed:`, chatErr);
       }
     }
 
@@ -252,23 +271,29 @@ export async function generateAdRedesign({
       }
     }
 
-    // Tier 3: Fallback Image Generation Engine via Flux
+    // Tier 3: High-Speed Secondary Fallback Engine via Pollinations Flux
     if (!finalRedesignBytes) {
-      console.log("Rendering performance marketing ad creative image via Flux fallback engine...");
+      console.log("LLM returned text or model failed. Rendering performance marketing ad creative image via Flux fallback engine...");
       const seed = Math.floor(Math.random() * 1_000_000);
       const cleanPrompt = `Modern uncluttered Instagram ad creative for ${leadTitle}, sleek performance marketing aesthetic, elegant typography, premium product photography, 4:5 ratio, high contrast visual hierarchy`;
       const fluxUrl = `https://pollinations.ai/p/${encodeURIComponent(cleanPrompt)}?width=1080&height=1080&seed=${seed}&model=flux&nologo=true`;
 
-      const fluxRes = await fetch(fluxUrl, { signal: AbortSignal.timeout(40_000) });
-      if (!fluxRes.ok) throw new Error("Could not generate redesign image file.");
-      const candidate = Buffer.from(await fluxRes.arrayBuffer());
-      if (await isValidImageBuffer(candidate)) {
-        finalRedesignBytes = candidate;
+      try {
+        const fluxRes = await fetch(fluxUrl, { signal: AbortSignal.timeout(30_000) });
+        if (fluxRes.ok) {
+          const candidate = Buffer.from(await fluxRes.arrayBuffer());
+          if (await isValidImageBuffer(candidate)) {
+            finalRedesignBytes = candidate;
+            actualModelName = `${openRouterModel} (via Flux engine)`;
+          }
+        }
+      } catch (fluxErr) {
+        console.warn("Flux fallback engine failed:", fluxErr);
       }
     }
 
     if (!finalRedesignBytes) {
-      throw new Error("Could not produce a valid image format for performance ad creative redesign.");
+      throw new Error(lastErrorMsg || `Could not generate valid image output from model '${openRouterModel}'.`);
     }
 
     // Determine final billing cost in USD
