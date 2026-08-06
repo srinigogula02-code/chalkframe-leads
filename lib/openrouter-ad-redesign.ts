@@ -113,14 +113,14 @@ export async function generateAdRedesign({
     let actualCostUsd: number | null = null;
     let lastErrorMsg = "";
 
-    // Tier 1: Dedicated OpenRouter Image Generation API (/api/v1/images) with auto-fallback payloads
+    // Tier 1: Dedicated OpenRouter Image Generation API (/api/v1/images) using "auto" aspect_ratio
     try {
       const attempts = [
-        // Attempt A: Standard aspect ratio 3:4, include input_references for non-OpenAI models
+        // Attempt A: Pass "auto" aspect ratio (lets OpenRouter & provider pick natively)
         {
           model: openRouterModel,
           prompt: promptText,
-          aspect_ratio: "3:4",
+          aspect_ratio: "auto",
           ...(!openRouterModel.startsWith("openai/")
             ? {
                 input_references: [
@@ -132,13 +132,13 @@ export async function generateAdRedesign({
               }
             : {}),
         },
-        // Attempt B: Square aspect ratio 1:1
+        // Attempt B: Minimal payload (prompt only with aspect_ratio "auto")
         {
           model: openRouterModel,
           prompt: promptText,
-          aspect_ratio: "1:1",
+          aspect_ratio: "auto",
         },
-        // Attempt C: Minimal payload (prompt only)
+        // Attempt C: Ultra-clean payload (prompt only)
         {
           model: openRouterModel,
           prompt: promptText,
