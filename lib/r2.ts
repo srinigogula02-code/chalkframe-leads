@@ -16,4 +16,4 @@ function connection() {
   return cached;
 }
 
-export async function uploadLeadImage(input:{key:string;bytes:Uint8Array;contentType:string}){const { config: value, client }=connection();await client.send(new PutObjectCommand({Bucket:value.bucket,Key:input.key,Body:input.bytes,ContentType:input.contentType,CacheControl:"public, max-age=31536000, immutable"}));return `${value.publicUrl}/${input.key.split("/").map(encodeURIComponent).join("/")}`}
+export async function uploadLeadImage(input:{key:string;bytes:Uint8Array;contentType:string;cacheControl?:string}){const { config: value, client }=connection();await client.send(new PutObjectCommand({Bucket:value.bucket,Key:input.key,Body:input.bytes,ContentType:input.contentType,CacheControl:input.cacheControl||"public, max-age=31536000, immutable"}));return `${value.publicUrl}/${input.key.split("/").map(encodeURIComponent).join("/")}`}
