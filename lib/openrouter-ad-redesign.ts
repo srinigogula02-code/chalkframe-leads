@@ -45,6 +45,51 @@ function getModelImageCost(modelId: string): number {
   return 0.02;
 }
 
+async function extractAdCreativeVisionDetails(imageUrl: string, apiKey: string): Promise<string> {
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+        "HTTP-Referer": "https://chalkframe.work",
+        "X-Title": "Chalkframe Performance Ad Redesign",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Inspect this ad creative image carefully. Briefly summarize: 1. The exact product/service/niche (e.g. custom t-shirt wholesale manufacturing). 2. Main headlines & text offers (e.g. MOQ: 50-100 Pcs). 3. Key visual elements (e.g. t-shirts, workshop). Keep it under 2 sentences.",
+              },
+              {
+                type: "image_url",
+                image_url: { url: imageUrl },
+              },
+            ],
+          },
+        ],
+        max_tokens: 200,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (res.ok) {
+      const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      const text = data.choices?.[0]?.message?.content;
+      if (typeof text === "string" && text.trim()) {
+        return text.trim();
+      }
+    }
+  } catch (err) {
+    console.warn("Could not extract vision details from source ad image:", err);
+  }
+  return "";
+}
+
 export async function generateAdRedesign({
   leadId,
   sourceImageUrl,
@@ -85,12 +130,24 @@ export async function generateAdRedesign({
 
   // Process & upload source ad image server-side
   const processedSource = await processAdCreativeImage(sourceImageUrl);
-  const promptText = getEffectiveAdRedesignPrompt(settings.system_prompt_override);
+
+  // Extract visual copy & product details from source image using Vision AI
+  const visionSummary = await extractAdCreativeVisionDetails(processedSource.url, apiKey);
+  const baseSystemPrompt = getEffectiveAdRedesignPrompt(settings.system_prompt_override);
+
+  const fullPromptText = [
+    `Performance marketing ad creative redesign for business "${leadTitle}".`,
+    visionSummary ? `Original Ad Visuals & Copy: ${visionSummary}` : "",
+    `Design Directives: ${baseSystemPrompt}`,
+    `Create a sleek, high-converting, modern 4:5 Instagram ad creative. Bold headline typography, clean mobile visual hierarchy, premium product focus matching the business niche above, uncluttered layout.`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   const openRouterModel = settings.model || "google/gemini-2.5-flash-image";
 
   const runRows = await sql`INSERT INTO lead_ad_redesign_runs (lead_id, source_image_id, source_image_url, lead_title, trigger, status, requested_model, prompt_used)
-    VALUES (${leadId}, ${sourceImageId || null}, ${processedSource.url}, ${leadTitle}, ${trigger}, 'processing', ${openRouterModel}, ${promptText})
+    VALUES (${leadId}, ${sourceImageId || null}, ${processedSource.url}, ${leadTitle}, ${trigger}, 'processing', ${openRouterModel}, ${fullPromptText})
     RETURNING id`;
   const runId = String(runRows[0].id);
 
@@ -104,10 +161,10 @@ export async function generateAdRedesign({
     // Tier 1: Dedicated OpenRouter Image Generation API (/api/v1/images) using exact requested model
     try {
       const attempts = [
-        // Attempt A: Pass "auto" aspect ratio (lets OpenRouter & provider pick natively)
+        // Attempt A: Pass "auto" aspect ratio with reference image if non-OpenAI
         {
           model: openRouterModel,
-          prompt: promptText,
+          prompt: fullPromptText,
           aspect_ratio: "auto",
           ...(!openRouterModel.startsWith("openai/")
             ? {
@@ -123,13 +180,13 @@ export async function generateAdRedesign({
         // Attempt B: Minimal payload (prompt only with aspect_ratio "auto")
         {
           model: openRouterModel,
-          prompt: promptText,
+          prompt: fullPromptText,
           aspect_ratio: "auto",
         },
         // Attempt C: Ultra-clean payload (prompt only)
         {
           model: openRouterModel,
-          prompt: promptText,
+          prompt: fullPromptText,
         },
       ];
 
@@ -196,7 +253,7 @@ export async function generateAdRedesign({
               {
                 role: "user",
                 content: [
-                  { type: "text", text: promptText },
+                  { type: "text", text: fullPromptText },
                   { type: "image_url", image_url: { url: processedSource.url } },
                 ],
               },
@@ -292,7 +349,9 @@ export async function generateAdRedesign({
     if (!finalRedesignBytes) {
       console.log("LLM returned text or model failed. Rendering performance marketing ad creative image via Flux fallback engine...");
       const seed = Math.floor(Math.random() * 1_000_000);
-      const cleanPrompt = `Modern uncluttered Instagram ad creative for ${leadTitle}, sleek performance marketing aesthetic, elegant typography, premium product photography, 4:5 ratio, high contrast visual hierarchy`;
+      const cleanPrompt = visionSummary
+        ? `High converting Instagram ad creative for ${leadTitle}. ${visionSummary}. 4:5 mobile ratio, modern performance marketing typography, sleek product showcase`
+        : `Modern uncluttered Instagram ad creative for ${leadTitle}, sleek performance marketing aesthetic, elegant typography, premium product photography, 4:5 ratio, high contrast visual hierarchy`;
       const fluxUrl = `https://pollinations.ai/p/${encodeURIComponent(cleanPrompt)}?width=1080&height=1080&seed=${seed}&model=flux&nologo=true`;
 
       try {
