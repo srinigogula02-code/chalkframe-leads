@@ -34,17 +34,17 @@ export default function RedesignReview({ user, lead, previousId, nextId }: { use
   }, [lead.id]);
 
   const queueCollages = useCallback(
-    async (retry = true) => {
+    async (retry = true, single = false) => {
       setError("");
       try {
         const response = await fetch(`/api/admin/leads/${lead.id}/collages`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ originalImageId: lead.collage_original_image_id, retry }),
+          body: JSON.stringify({ originalImageId: lead.collage_original_image_id, retry, useSingleRedesign: single }),
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "The collage could not be queued.");
-        setRedesigns(current => current.map(image => (image.collageStatus === "completed" ? image : { ...image, collageStatus: "queued", collageError: null })));
+        setRedesigns(current => current.map(image => ({ ...image, collageStatus: "queued", collageError: null })));
         window.setTimeout(() => void refreshCollages(), 1400);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "The collage could not be queued.");
@@ -243,7 +243,8 @@ export default function RedesignReview({ user, lead, previousId, nextId }: { use
             hasOriginal={lead.images.length > 0}
             selectedOriginal={Boolean(lead.collage_original_image_id)}
             onSelect={setSelectedImage}
-            onRetry={() => void queueCollages(true)}
+            onRetry={() => void queueCollages(true, false)}
+            onRetrySingle={() => void queueCollages(true, true)}
             businessId={lead.id}
             activeId={activeDraftId}
             onChoose={setActiveDraftId}
@@ -304,6 +305,7 @@ function ComparisonPanel({
   selectedOriginal,
   onSelect,
   onRetry,
+  onRetrySingle,
   businessId,
   activeId,
   onChoose,
@@ -313,6 +315,7 @@ function ComparisonPanel({
   selectedOriginal: boolean;
   onSelect: (image: ReviewImage) => void;
   onRetry: () => void;
+  onRetrySingle: () => void;
   businessId: string;
   activeId: string;
   onChoose: (id: string) => void;
@@ -327,7 +330,30 @@ function ComparisonPanel({
           <span className="technical">Automatic comparison</span>
           <h2>Original + redesign</h2>
         </div>
-        <b>16:9</b>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            title="Create 16:9 banner using single redesign image centered"
+            onClick={onRetrySingle}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              background: "#1e293b",
+              border: "1px solid #334155",
+              color: "#c4b5fd",
+              padding: "5px 10px",
+              borderRadius: 6,
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            <Sparkles size={13} />
+            Use Single Image
+          </button>
+          <b>16:9</b>
+        </div>
       </header>
       {ready.length ? (
         <div className="comparison-review-grid">
@@ -353,37 +379,40 @@ function ComparisonPanel({
           {pending ? (
             <>
               <Clock3 size={22} />
-              <strong>Creating collage in the background</strong>
+              <strong>Creating 16:9 banner in the background</strong>
               <span>This page updates automatically.</span>
             </>
-          ) : failed ? (
-            <>
-              <RefreshCw size={22} />
-              <strong>Collage needs a retry</strong>
-              <button onClick={onRetry}>Retry collage</button>
-            </>
-          ) : !hasOriginal ? (
+          ) : (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, textAlign: "center", padding: "16px" }}>
               <Images size={22} />
-              <strong>Original creative missing</strong>
-              <span style={{ fontSize: 11, color: "#8291a8" }}>Use the single redesigned image placed centered in a 16:9 banner canvas.</span>
-              <button type="button" onClick={onRetry} style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6, background: "#6366f1", color: "#fff", border: 0, padding: "8px 14px", borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
-                <Sparkles size={13} />
+              <strong>{failed ? "Original image unreadable / failed" : "16:9 Banner Option"}</strong>
+              <span style={{ fontSize: 11, color: "#8291a8", maxWidth: 260 }}>
+                {failed
+                  ? "Original Facebook ad creative could not be loaded. Generate a 16:9 banner with the single redesign image placed centered in the middle."
+                  : "Generate a 16:9 banner using the single redesign image placed centered in the middle."}
+              </span>
+              <button
+                type="button"
+                onClick={onRetrySingle}
+                style={{
+                  marginTop: 6,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  background: "#6366f1",
+                  color: "#fff",
+                  border: 0,
+                  padding: "9px 16px",
+                  borderRadius: 8,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                <Sparkles size={14} />
                 Use Single Redesign Image (Centered)
               </button>
             </div>
-          ) : !selectedOriginal ? (
-            <>
-              <Images size={22} />
-              <strong>Choose an original creative</strong>
-              <Link href={`/dashboard/leads/${businessId}`}>Choose on business page</Link>
-            </>
-          ) : (
-            <>
-              <Clock3 size={22} />
-              <strong>Collage queued</strong>
-              <span>This page updates automatically.</span>
-            </>
           )}
         </div>
       )}

@@ -10,16 +10,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const user = await getSession();
   if (!user || user.role !== "admin") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-  const body = await req.json().catch(() => ({})) as { originalImageId?: unknown; retry?: unknown };
+  const body = await req.json().catch(() => ({})) as { originalImageId?: unknown; retry?: unknown; useSingleRedesign?: unknown };
   const [leadRows, originals] = await Promise.all([
     sql`SELECT id, collage_original_image_id FROM leads WHERE id=${id}`,
     sql`SELECT id FROM lead_images WHERE lead_id=${id} ORDER BY position, created_at`,
   ]);
   if (!leadRows[0]) return NextResponse.json({ error: "Business not found." }, { status: 404 });
-  if (!originals.length) {
-    await sql`UPDATE redesign_images
-      SET collage_status='queued', collage_error=NULL, collage_requested_at=now(), collage_started_at=NULL
-      WHERE lead_id=${id} AND (collage_status IN ('waiting','failed') OR ${Boolean(body.retry)})`;
+  if (body.useSingleRedesign || !originals.length) {
+    await sql.transaction([
+      sql`UPDATE leads SET collage_original_image_id=NULL, updated_at=now() WHERE id=${id}`,
+      sql`UPDATE redesign_images SET collage_status='queued', collage_error=NULL, collage_requested_at=now(), collage_started_at=NULL WHERE lead_id=${id}`,
+    ]);
     after(() => processCollageQueue(id));
     return NextResponse.json({ queued: true, singleImageMode: true });
   }
