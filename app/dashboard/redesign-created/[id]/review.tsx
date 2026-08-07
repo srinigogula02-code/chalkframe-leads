@@ -171,7 +171,16 @@ export default function RedesignReview({ user, lead, previousId, nextId }: { use
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Phase could not be updated.");
-      router.push("/dashboard/redesign-created");
+      
+      if (nextStatus === "ad_inactive") {
+        router.push("/dashboard?status=ad_inactive");
+      } else if (nextStatus === "contacted") {
+        router.push("/dashboard?status=contacted");
+      } else if (nextStatus === "redesign_created") {
+        router.push(`/dashboard/redesign-created/${lead.id}`);
+      } else {
+        router.push(`/dashboard/leads/${lead.id}?status=${nextStatus}`);
+      }
       router.refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Phase could not be updated.");
