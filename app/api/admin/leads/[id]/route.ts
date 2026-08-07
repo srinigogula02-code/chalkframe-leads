@@ -43,16 +43,26 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (chatgptUrl && !validUrl(chatgptUrl)) return NextResponse.json({ error: "ChatGPT URL must start with http:// or https://." }, { status: 400 });
     const requestedOriginal = clean(body.collageOriginalImageId, 36);
 
-    const rows = await sql`
-      UPDATE leads
-      SET admin_notes = COALESCE(${clean(body.adminNotes, 10_000) || null}, admin_notes),
-          chatgpt_url = COALESCE(${chatgptUrl || null}, chatgpt_url),
-          workflow_status = ${body.workflowStatus},
-          collage_original_image_id = CASE WHEN ${Boolean(requestedOriginal)} THEN ${requestedOriginal}::uuid ELSE collage_original_image_id END,
-          updated_at = now()
-      WHERE id = ${id}
-      RETURNING id, workflow_status, collage_original_image_id
-    `;
+    const rows = requestedOriginal
+      ? await sql`
+          UPDATE leads
+          SET admin_notes = COALESCE(${clean(body.adminNotes, 10_000) || null}, admin_notes),
+              chatgpt_url = COALESCE(${chatgptUrl || null}, chatgpt_url),
+              workflow_status = ${body.workflowStatus},
+              collage_original_image_id = ${requestedOriginal}::uuid,
+              updated_at = now()
+          WHERE id = ${id}
+          RETURNING id, workflow_status, collage_original_image_id
+        `
+      : await sql`
+          UPDATE leads
+          SET admin_notes = COALESCE(${clean(body.adminNotes, 10_000) || null}, admin_notes),
+              chatgpt_url = COALESCE(${chatgptUrl || null}, chatgpt_url),
+              workflow_status = ${body.workflowStatus},
+              updated_at = now()
+          WHERE id = ${id}
+          RETURNING id, workflow_status, collage_original_image_id
+        `;
     if (!rows[0]) return NextResponse.json({ error: "Business not found." }, { status: 404 });
     return NextResponse.json({ saved: true, workflowStatus: rows[0].workflow_status, collageOriginalImageId: rows[0].collage_original_image_id });
   }
