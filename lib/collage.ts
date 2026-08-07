@@ -169,18 +169,36 @@ export async function processCollageQueue(leadId: string) {
         // Match specific original creative paired with this redesign, or fallback to lead default original
         const targetOriginal = (row.collage_source_image_id && originalMap.get(String(row.collage_source_image_id))) || defaultOriginal;
 
-        const originalBytes = await getOriginalBytes(targetOriginal.id, targetOriginal.url);
+        let originalBytes: Uint8Array | null = null;
+        if (targetOriginal?.url) {
+          try {
+            originalBytes = await getOriginalBytes(targetOriginal.id, targetOriginal.url);
+          } catch {
+            // Original image fetch failed (e.g. Facebook CDN expired or ad went inactive) -> fall back to single redesign banner
+            originalBytes = null;
+          }
+        }
+
         const redesignBytes = await fetchImage(row.url);
-        const collage = await createComparisonCollage(originalBytes, redesignBytes);
         
-        const version = createHash("sha256").update(`${targetOriginal.id}\n${targetOriginal.url}\n${row.url}`).digest("hex").slice(0, 16);
+        let collage: Uint8Array;
+        let version: string;
+        if (originalBytes && targetOriginal) {
+          collage = await createComparisonCollage(originalBytes, redesignBytes);
+          version = createHash("sha256").update(`${targetOriginal.id}\n${targetOriginal.url}\n${row.url}`).digest("hex").slice(0, 16);
+        } else {
+          collage = await createSingleImageCollage(redesignBytes);
+          version = createHash("sha256").update(`single\n${row.url}`).digest("hex").slice(0, 16);
+        }
+
         const now = new Date();
         const key = `leads/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/collages/${leadId}/${row.id}-${version}.png`;
         const collageUrl = await uploadLeadImage({ key, bytes: collage, contentType: "image/png" });
 
         await sql`UPDATE redesign_images 
           SET collage_url=${collageUrl}, collage_status='completed', collage_error=NULL,
-              collage_source_image_id=${targetOriginal.id}, collage_source_redesign_url=${row.url}, 
+              collage_source_image_id=${originalBytes && targetOriginal ? targetOriginal.id : null},
+              collage_source_redesign_url=${row.url}, 
               collage_completed_at=now(), collage_started_at=NULL
           WHERE id=${row.id} AND lead_id=${leadId} AND collage_status='processing'`;
       } catch (error) {
