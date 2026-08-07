@@ -113,3 +113,30 @@
 
 @media(max-width:1180px){.ai-health-strip{grid-template-columns:1fr 1fr}.ai-health-strip article:nth-child(2){border-right:0}.ai-health-strip article:nth-child(-n+2){border-bottom:1px solid #293449}.ai-metric-grid{grid-template-columns:1fr 1fr}.ai-settings-grid{grid-template-columns:1fr 1fr}.ai-model-field{grid-column:auto}.ai-data-grid{grid-template-columns:1fr}}
 @media(max-width:720px){.ai-topbar{display:grid}.ai-topbar .secondary-button{display:flex;margin-top:8px}.ai-health-strip,.ai-metric-grid,.ai-settings-grid{grid-template-columns:1fr}.ai-health-strip article{min-height:120px;border-right:0;border-bottom:1px solid #293449}.ai-health-strip article:nth-child(3){border-bottom:1px solid #293449}.ai-health-strip article:last-child{border-bottom:0}.ai-model-field{grid-column:auto}.ai-settings-panel{padding:18px}.ai-settings-panel>header{flex-direction:column}.ai-settings-panel>footer{align-items:stretch;flex-direction:column;gap:10px}.ai-settings-panel>footer .primary-button{width:100%;justify-content:center}.ai-table-row{grid-template-columns:minmax(150px,1fr) 50px 65px}.ai-table-row>*:nth-child(4),.ai-table-row>*:nth-child(5){display:none}.ai-data-grid{grid-template-columns:1fr}.review-contact-sheet>.email-action-card{min-height:430px}}
+
+/* ── Nav Dropdown (pages without sidebar) ─────────────────────── */
+.nav-dropdown-wrap{position:relative;z-index:100}
+.nav-dropdown-trigger{display:flex;align-items:center;gap:6px;padding:7px 12px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
+.nav-dropdown-trigger:hover{background:#293449;border-color:#4f6080}
+.business-topbar .nav-dropdown-trigger,.redesign-review-topbar .nav-dropdown-trigger{background:#1e293b;color:#e2e8f0}
+.nav-dropdown-panel{position:absolute;top:calc(100% + 8px);right:0;min-width:200px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 12px 40px #0002;overflow:hidden}
+.nav-dropdown-links{display:flex;flex-direction:column;padding:6px}
+.nav-dropdown-links a{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:6px;color:#374151;font-size:12px;font-weight:600;text-decoration:none}
+.nav-dropdown-links a:hover{background:#f8fafc;color:#111827}
+.nav-dropdown-user{display:flex;align-items:center;gap:9px;padding:10px 12px;border-top:1px solid #f1f5f9;font-size:11px}
+.nav-dropdown-user>span{width:28px;height:28px;border-radius:50%;background:#6366f1;color:#fff;display:grid;place-items:center;font-size:11px;font-weight:800;flex-shrink:0}
+.nav-dropdown-user strong{display:block;font-size:12px;color:#1e293b}
+.nav-dropdown-user small{color:#94a3b8}
+.nav-dropdown-user>div{flex:1;min-width:0}
+.nav-dropdown-logout{background:none;border:none;cursor:pointer;color:#94a3b8;display:grid;place-items:center;padding:4px;border-radius:4px}
+.nav-dropdown-logout:hover{background:#fef2f2;color:#dc2626}
+
+/* ── Employee row inactive button ──────────────────────────────── */
+.employee-row-actions{display:flex;align-items:center;gap:5px}
+.inactive-button{display:flex;align-items:center;gap:4px;padding:5px 9px;border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:6px;font-size:10px;font-weight:750;cursor:pointer}
+.inactive-button:hover{background:#fef2f2}
+.inactive-button:disabled{opacity:.45;cursor:not-allowed}
+
+/* ── Ad Inactive status pill ───────────────────────────────────── */
+.status.ad_inactive i{background:#f59e0b}
+

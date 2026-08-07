@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, ArrowUpRight, Bot, Check, CheckCircle2, ChevronLeft, Clock3, Copy, Image as ImageIcon, Images, Mail, Phone, Plus, RefreshCw, Save, Sparkles, StickyNote, Trash2, X } from "lucide-react";
 import { WORKFLOW_LABELS, WORKFLOW_STATUSES, type WorkflowStatus } from "@/lib/workflow";
+import NavDropdown from "@/app/dashboard/_components/nav-dropdown";
+import type { SessionUser } from "@/lib/db";
 import type { BusinessImage, BusinessLead } from "./page";
 
 type CollageResponse = { collageOriginalImageId:string|null; redesignImages:BusinessImage[]; collageQueued?:boolean; workflowStatus?:WorkflowStatus; error?:string };
 
-export default function BusinessWorkspace({ lead, previousId, nextId, statusFilter }: { lead:BusinessLead; previousId:string|null; nextId:string|null; statusFilter:WorkflowStatus|"all" }) {
+export default function BusinessWorkspace({ user, lead, previousId, nextId, statusFilter }: { user: SessionUser | null; lead:BusinessLead; previousId:string|null; nextId:string|null; statusFilter:WorkflowStatus|"all" }) {
   const router=useRouter();
   const soleOriginal=lead.images.length===1?lead.images[0].id||null:null;
   const [notes,setNotes]=useState(lead.admin_notes||"");
@@ -91,7 +93,7 @@ export default function BusinessWorkspace({ lead, previousId, nextId, statusFilt
   async function remove(){setSaving(true);setError("");try{const res=await fetch(`/api/admin/leads/${lead.id}`,{method:"DELETE"});const body=await res.json();if(!res.ok)throw new Error(body.error||"Could not delete this business.");router.push("/dashboard");router.refresh()}catch(e){setError(e instanceof Error?e.message:"Could not delete this business.");setConfirmDelete(false);setSaving(false)}}
 
   return <main className="business-page">
-    <header className="business-topbar"><Link href="/dashboard" className="back-link"><ChevronLeft size={17}/>Lead workspace</Link><img src="/brand/chalkframe-logo-dark.svg" alt="Chalkframe"/><nav className="record-nav">{status==="research_completed"&&<a className="chatgpt-launch" href={chatGptHref} target="_blank" rel="noreferrer"><Sparkles size={14}/>Open ChatGPT</a>}<Link aria-disabled={!previousId} className={!previousId?"disabled":""} href={previousId?`/dashboard/leads/${previousId}${query}`:"#"}><ArrowLeft size={16}/><span>Previous</span></Link><span className="technical">Business record</span><Link aria-disabled={!nextId} className={!nextId?"disabled":""} href={nextId?`/dashboard/leads/${nextId}${query}`:"#"}><span>Next</span><ArrowRight size={16}/></Link></nav></header>
+    <header className="business-topbar"><Link href="/dashboard" className="back-link"><ChevronLeft size={17}/>Lead workspace</Link><img src="/brand/chalkframe-logo-dark.svg" alt="Chalkframe"/><nav className="record-nav">{status==="research_completed"&&<a className="chatgpt-launch" href={chatGptHref} target="_blank" rel="noreferrer"><Sparkles size={14}/>Open ChatGPT</a>}<Link aria-disabled={!previousId} className={!previousId?"disabled":""} href={previousId?`/dashboard/leads/${previousId}${query}`:"#"}><ArrowLeft size={16}/><span>Previous</span></Link><span className="technical">Business record</span><Link aria-disabled={!nextId} className={!nextId?"disabled":""} href={nextId?`/dashboard/leads/${nextId}${query}`:"#"}><span>Next</span><ArrowRight size={16}/></Link></nav>{user && <NavDropdown user={user} />}</header>
     <section className="business-hero"><div><h1>{lead.title||"Meta ad business"}</h1><a href={lead.ad_url} target="_blank" rel="noreferrer">Open source ad <ArrowUpRight size={14}/></a></div><label className="status-select">Workflow status<select value={status} onChange={e=>setStatus(e.target.value as WorkflowStatus)}>{WORKFLOW_STATUSES.map(item=><option key={item} value={item}>{WORKFLOW_LABELS[item]}</option>)}</select></label></section>
     <section className="workflow-rail">{WORKFLOW_STATUSES.map((item,index)=>{const current=WORKFLOW_STATUSES.indexOf(status);return <div className={index<=current?"reached":""} key={item}><i>{index<current?<Check size={13}/>:index+1}</i><span>{WORKFLOW_LABELS[item]}</span></div>})}</section>
     <div className="business-layout"><div className="business-canvas">

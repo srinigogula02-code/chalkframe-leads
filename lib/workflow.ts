@@ -1,8 +1,9 @@
-export const WORKFLOW_STATUSES = ["research_pending", "research_completed", "redesign_created", "contacted"] as const;
+export const WORKFLOW_STATUSES = ["research_pending", "ad_inactive", "research_completed", "redesign_created", "contacted"] as const;
 export type WorkflowStatus = typeof WORKFLOW_STATUSES[number];
 
 export const WORKFLOW_LABELS: Record<WorkflowStatus, string> = {
   research_pending: "Research pending",
+  ad_inactive: "Ad inactive",
   research_completed: "Research completed",
   redesign_created: "Redesign created",
   contacted: "Contacted",

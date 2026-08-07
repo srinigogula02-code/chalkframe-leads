@@ -28,8 +28,7 @@ export default async function BusinessPage({ params, searchParams }: { params: P
   ]);
   const previousId=previous[0]?.id?String(previous[0].id):null;
   const nextId=next[0]?.id?String(next[0].id):null;
-  return <BusinessWorkspace lead={rows[0] as unknown as BusinessLead} previousId={previousId} nextId={nextId} statusFilter={statusFilter} />;
-}
+  return <BusinessWorkspace user={user} lead={rows[0] as unknown as BusinessLead} previousId={previousId} nextId={nextId} statusFilter={statusFilter} />;}
 
 export type BusinessImage = { id?: string; url: string; description: string | null; collageUrl?:string|null; collageStatus?:"waiting"|"queued"|"processing"|"completed"|"failed"; collageError?:string|null; emailDraft?:EmailDraft|null };
 export type BusinessLead = {

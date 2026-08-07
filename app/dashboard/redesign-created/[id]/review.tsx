@@ -4,9 +4,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, ArrowUpRight, Bot, Check, Clock3, Copy, Image as ImageIcon, Images, Laptop, Mail, RefreshCw, Send, Smartphone, X } from "lucide-react";
+import { WORKFLOW_LABELS, WORKFLOW_STATUSES, type WorkflowStatus } from "@/lib/workflow";
+import NavDropdown from "@/app/dashboard/_components/nav-dropdown";
+import type { SessionUser } from "@/lib/db";
 import type { RedesignLead, ReviewImage } from "./page";
 
-export default function RedesignReview({ lead, previousId, nextId }: { lead: RedesignLead; previousId: string | null; nextId: string | null }) {
+export default function RedesignReview({ user, lead, previousId, nextId }: { user: SessionUser | null; lead: RedesignLead; previousId: string | null; nextId: string | null }) {
   const router = useRouter();
   const [redesigns, setRedesigns] = useState(lead.redesign_images);
   const [confirmContacted, setConfirmContacted] = useState(false);
@@ -156,6 +159,26 @@ export default function RedesignReview({ lead, previousId, nextId }: { lead: Red
     }
   }
 
+  async function moveToPhase(nextStatus: WorkflowStatus) {
+    if (nextStatus === lead.workflow_status) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/admin/leads/${lead.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workflowStatus: nextStatus }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Phase could not be updated.");
+      router.push("/dashboard/redesign-created");
+      router.refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Phase could not be updated.");
+      setBusy(false);
+    }
+  }
+
   async function moveToContacted() {
     setBusy(true);
     setError("");
@@ -191,16 +214,32 @@ export default function RedesignReview({ lead, previousId, nextId }: { lead: Red
             <ArrowRight size={16} />
           </Link>
         </nav>
+        {user && <NavDropdown user={user} />}
       </header>
       <section className="redesign-review-hero">
-        <div className="review-title">
+          <div className="review-title">
           <div>
             <span className="technical">Redesign created</span>
             <h1>{lead.title || "Meta ad business"}</h1>
           </div>
-          <a href={lead.ad_url} target="_blank" rel="noreferrer">
-            Open source ad <ArrowUpRight size={13} />
-          </a>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <a href={lead.ad_url} target="_blank" rel="noreferrer">
+              Open source ad <ArrowUpRight size={13} />
+            </a>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#64748b" }}>
+              Move phase:
+              <select
+                value={lead.workflow_status}
+                disabled={busy}
+                onChange={e => void moveToPhase(e.target.value as WorkflowStatus)}
+                style={{ fontSize: 12, padding: "3px 6px", borderRadius: 5, border: "1px solid #d1d5db", background: "#f9fafb", cursor: "pointer" }}
+              >
+                {WORKFLOW_STATUSES.map(s => (
+                  <option key={s} value={s}>{WORKFLOW_LABELS[s]}</option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
         <div className="review-contact-sheet">
           <ComparisonPanel
