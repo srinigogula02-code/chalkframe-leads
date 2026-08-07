@@ -16,7 +16,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     sql`SELECT id FROM lead_images WHERE lead_id=${id} ORDER BY position, created_at`,
   ]);
   if (!leadRows[0]) return NextResponse.json({ error: "Business not found." }, { status: 404 });
-  if (!originals.length) return NextResponse.json({ error: "Add an original ad creative before creating a collage." }, { status: 409 });
+  if (!originals.length) {
+    await sql`UPDATE redesign_images
+      SET collage_status='queued', collage_error=NULL, collage_requested_at=now(), collage_started_at=NULL
+      WHERE lead_id=${id} AND (collage_status IN ('waiting','failed') OR ${Boolean(body.retry)})`;
+    after(() => processCollageQueue(id));
+    return NextResponse.json({ queued: true, singleImageMode: true });
+  }
   const ids = new Set(originals.map(row => String(row.id)));
   const requested = String(body.originalImageId ?? "").trim();
   if (requested && (!uuidPattern.test(requested) || !ids.has(requested))) return NextResponse.json({ error: "Choose an original creative from this business." }, { status: 400 });

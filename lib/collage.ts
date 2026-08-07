@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import sharp from "sharp";
-import { createComparisonCollage } from "@/lib/collage-image";
+import { createComparisonCollage, createSingleImageCollage } from "@/lib/collage-image";
 import { sql } from "@/lib/db";
 import { processEmailDraftQueue, queueEmailDraftsForLead } from "@/lib/openrouter-email";
 import { uploadLeadImage } from "@/lib/r2";
@@ -105,7 +105,35 @@ export async function processCollageQueue(leadId: string) {
   ]);
 
   if (!allOriginals.length) {
-    await sql`UPDATE redesign_images SET collage_status='waiting', collage_error=NULL, collage_started_at=NULL WHERE lead_id=${leadId} AND collage_status IN ('queued','processing')`;
+    const claimed = (await sql`UPDATE redesign_images 
+      SET collage_status='processing', collage_error=NULL, collage_started_at=now()
+      WHERE lead_id=${leadId} AND collage_status='queued'
+      RETURNING id, url, collage_source_image_id`) as QueueRow[];
+
+    if (!claimed.length) return;
+
+    for (const row of claimed) {
+      try {
+        const redesignBytes = await fetchImage(row.url);
+        const collage = await createSingleImageCollage(redesignBytes);
+        
+        const version = createHash("sha256").update(`single\n${row.url}`).digest("hex").slice(0, 16);
+        const now = new Date();
+        const key = `leads/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/collages/${leadId}/${row.id}-${version}.png`;
+        const collageUrl = await uploadLeadImage({ key, bytes: collage, contentType: "image/png" });
+
+        await sql`UPDATE redesign_images 
+          SET collage_url=${collageUrl}, collage_status='completed', collage_error=NULL,
+              collage_source_image_id=NULL, collage_source_redesign_url=${row.url}, 
+              collage_completed_at=now(), collage_started_at=NULL
+          WHERE id=${row.id} AND lead_id=${leadId} AND collage_status='processing'`;
+      } catch (error) {
+        await markFailed([row.id], error instanceof Error ? error.message : "The single image banner could not be created.");
+      }
+    }
+
+    const draftQueue = await queueEmailDraftsForLead(leadId).catch(() => ({ queued: 0 }));
+    if (draftQueue.queued > 0) processEmailDraftQueue(leadId);
     return;
   }
 

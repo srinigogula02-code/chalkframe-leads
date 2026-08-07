@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowLeft, ArrowRight, ArrowUpRight, Bot, Check, Clock3, Copy, Image as ImageIcon, Images, Laptop, Mail, RefreshCw, Send, Smartphone, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, ArrowUpRight, Bot, Check, Clock3, Copy, Image as ImageIcon, Images, Laptop, Mail, RefreshCw, Send, Smartphone, Sparkles, X } from "lucide-react";
 import { WORKFLOW_LABELS, WORKFLOW_STATUSES, type WorkflowStatus } from "@/lib/workflow";
 import NavDropdown from "@/app/dashboard/_components/nav-dropdown";
 import type { SessionUser } from "@/lib/db";
@@ -363,11 +363,15 @@ function ComparisonPanel({
               <button onClick={onRetry}>Retry collage</button>
             </>
           ) : !hasOriginal ? (
-            <>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, textAlign: "center", padding: "16px" }}>
               <Images size={22} />
-              <strong>Original creative needed</strong>
-              <Link href={`/dashboard/leads/${businessId}`}>Open business</Link>
-            </>
+              <strong>Original creative missing</strong>
+              <span style={{ fontSize: 11, color: "#8291a8" }}>Use the single redesigned image placed centered in a 16:9 banner canvas.</span>
+              <button type="button" onClick={onRetry} style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6, background: "#6366f1", color: "#fff", border: 0, padding: "8px 14px", borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                <Sparkles size={13} />
+                Use Single Redesign Image (Centered)
+              </button>
+            </div>
           ) : !selectedOriginal ? (
             <>
               <Images size={22} />

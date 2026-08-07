@@ -13,6 +13,24 @@ async function fitInside(bytes: Uint8Array) {
     .toBuffer({ resolveWithObject: true });
 }
 
+async function fitInsideSingle(bytes: Uint8Array) {
+  return sharp(bytes, { failOn: "error", limitInputPixels: 40_000_000 })
+    .rotate()
+    .resize({ width: CANVAS_WIDTH - PADDING * 2, height: CANVAS_HEIGHT - PADDING * 2, fit: "inside", withoutEnlargement: false })
+    .png()
+    .toBuffer({ resolveWithObject: true });
+}
+
+export async function createSingleImageCollage(redesign: Uint8Array) {
+  const img = await fitInsideSingle(redesign);
+  return sharp({ create: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT, channels: 4, background: "#f3f0ea" } })
+    .composite([
+      { input: img.data, left: Math.round((CANVAS_WIDTH - img.info.width) / 2), top: Math.round((CANVAS_HEIGHT - img.info.height) / 2) },
+    ])
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+}
+
 export async function createComparisonCollage(original: Uint8Array, redesign: Uint8Array) {
   const [left, right] = await Promise.all([fitInside(original), fitInside(redesign)]);
   return sharp({ create: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT, channels: 4, background: "#f3f0ea" } })
@@ -23,3 +41,4 @@ export async function createComparisonCollage(original: Uint8Array, redesign: Ui
     .png({ compressionLevel: 9 })
     .toBuffer();
 }
+
