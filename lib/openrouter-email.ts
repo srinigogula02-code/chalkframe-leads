@@ -24,6 +24,7 @@ type DraftRow = {
   recipient_email: string | null;
   requested_trigger: string;
   title: string | null;
+  is_single_banner?: boolean;
 };
 
 type ParsedOutput =
@@ -200,7 +201,7 @@ async function callModelOnce({
   const start = Date.now();
   const fallback = settings.fallback_model?.trim();
   const inputText = [
-    buildEmailInput({ businessTitle: draft.title, recipientEmail: draft.recipient_email }),
+    buildEmailInput({ businessTitle: draft.title, recipientEmail: draft.recipient_email, isSingleBanner: Boolean(draft.is_single_banner) }),
     correction ? `\nCORRECTION REQUIRED\n${correction}\nReturn a corrected result only.` : "",
   ].join("");
   const result = client.callModel({
@@ -318,15 +319,14 @@ async function markBlocked(draft: DraftRow, settings: EmailSettings, code: strin
 
 export async function processEmailDraftQueue(leadId: string) {
   const settings = await loadSettings();
-  if (!settings.enabled) {
-    await sql`UPDATE lead_email_drafts SET status='waiting', started_at=NULL, updated_at=now() WHERE lead_id=${leadId} AND status IN ('queued','processing')`;
-    return { processed: 0, blocked: 0 };
-  }
+  if (!settings.enabled) return { processed: 0, blocked: 0 };
 
   await sql`UPDATE lead_email_drafts SET status='queued', error_code='processing_timeout', error_message='The previous background run timed out and was queued again.', started_at=NULL, requested_at=now(), updated_at=now()
     WHERE lead_id=${leadId} AND status='processing' AND started_at < now() - (${PROCESSING_TIMEOUT_MINUTES} * interval '1 minute')`;
-  const claimed = await sql`WITH candidates AS (
-      SELECT d.id FROM lead_email_drafts d
+  const claimed = await sql`
+    WITH candidates AS (
+      SELECT d.id
+      FROM lead_email_drafts d
       JOIN redesign_images r ON r.id=d.redesign_image_id
       WHERE d.lead_id=${leadId} AND d.status='queued' AND r.collage_status='completed' AND r.collage_url=d.source_collage_url
       ORDER BY d.requested_at NULLS FIRST, d.created_at
@@ -335,9 +335,9 @@ export async function processEmailDraftQueue(leadId: string) {
     )
     UPDATE lead_email_drafts d SET status='processing', started_at=now(), error_code=NULL, error_message=NULL,
       attempt_count=d.attempt_count+1, updated_at=now()
-    FROM candidates, leads l
-    WHERE d.id=candidates.id AND l.id=d.lead_id
-    RETURNING d.id, d.lead_id, d.redesign_image_id, d.source_collage_url, d.recipient_email, d.requested_trigger, l.title` as DraftRow[];
+    FROM candidates, leads l, redesign_images r
+    WHERE d.id=candidates.id AND l.id=d.lead_id AND r.id=d.redesign_image_id
+    RETURNING d.id, d.lead_id, d.redesign_image_id, d.source_collage_url, d.recipient_email, d.requested_trigger, l.title, (r.collage_source_image_id IS NULL) AS is_single_banner` as DraftRow[];
   if (!claimed.length) return { processed: 0, blocked: 0 };
 
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
