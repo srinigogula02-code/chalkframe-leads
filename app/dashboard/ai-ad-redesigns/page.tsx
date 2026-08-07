@@ -20,7 +20,7 @@ export default async function AIAdRedesignsPage() {
   if (user.role !== "admin") redirect("/dashboard");
 
   const [settingsRows, summaryRows, modelRows, recentRuns, models, credits, exchangeRate] = await Promise.all([
-    sql`SELECT enabled, auto_redesign_on_ad_add, model, fallback_model, temperature, max_output_tokens, max_cost_usd, monthly_budget_usd, system_prompt_override, updated_at FROM ai_ad_redesign_settings WHERE id=1`,
+    sql`SELECT enabled, auto_redesign_on_ad_add, model, fallback_model, temperature, max_output_tokens, max_cost_usd, monthly_budget_usd, system_prompt_override, aspect_ratio, quality, creative_guidance, updated_at FROM ai_ad_redesign_settings WHERE id=1`,
     sql`SELECT COUNT(*)::text AS total_runs,
       COUNT(*) FILTER (WHERE status='completed')::text AS completed_runs,
       COUNT(*) FILTER (WHERE status='failed')::text AS failed_runs,

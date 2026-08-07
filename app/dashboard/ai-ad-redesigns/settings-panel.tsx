@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Check, Edit3, Pause, Play, RefreshCw, Save, ShieldCheck, Sparkles, ToggleLeft, ToggleRight } from "lucide-react";
+import { Check, Edit3, Pause, Play, RefreshCw, Save, Sparkles, ToggleLeft, ToggleRight, Sliders } from "lucide-react";
 import { CurrencyCode, DEFAULT_USD_TO_INR, formatCurrency, formatPerMillion } from "@/lib/currency";
 import type { OpenRouterModelOption } from "@/lib/openrouter-models";
 
@@ -15,6 +15,9 @@ export type AIAdRedesignSettings = {
   max_cost_usd: string | number;
   monthly_budget_usd: string | number;
   system_prompt_override: string | null;
+  aspect_ratio: string;
+  quality: string;
+  creative_guidance: string | null;
   updated_at: string;
 };
 
@@ -135,6 +138,9 @@ export default function AdRedesignSettingsPanel({
           maxCostUsd: settings.max_cost_usd,
           monthlyBudgetUsd: settings.monthly_budget_usd,
           systemPromptOverride: settings.system_prompt_override,
+          aspectRatio: settings.aspect_ratio,
+          quality: settings.quality,
+          creativeGuidance: settings.creative_guidance,
         }),
       });
       const body = await response.json();
@@ -162,7 +168,7 @@ export default function AdRedesignSettingsPanel({
         <div>
           <span className="technical">Generation controls</span>
           <h2>AI Ad Creative Redesign Settings</h2>
-          <p>Configure image generation models, auto-redesign triggers, performance-marketing prompts, and cost safety guards.</p>
+          <p>Configure image generation models, output aspect ratio & quality, fine-tuning guidance, and budget guards.</p>
         </div>
         <div className="header-toggle-actions">
           <button
@@ -205,7 +211,7 @@ export default function AdRedesignSettingsPanel({
           models={models}
           currency={currency}
           exchangeRate={exchangeRate}
-          placeholder="e.g. google/gemini-2.5-flash-image"
+          placeholder="e.g. openai/gpt-image-2"
         />
 
         <ModelSelectorField
@@ -216,8 +222,38 @@ export default function AdRedesignSettingsPanel({
           models={models}
           currency={currency}
           exchangeRate={exchangeRate}
-          placeholder="e.g. black-forest-labs/flux-1-schnell"
+          placeholder="e.g. openai/gpt-image-1"
         />
+
+        <label>
+          <span>Aspect ratio</span>
+          <select
+            value={settings.aspect_ratio || "auto"}
+            onChange={event => setSettings(current => ({ ...current, aspect_ratio: event.target.value }))}
+            className="ai-model-select"
+          >
+            <option value="auto">Auto (Match Original Creative Ratio)</option>
+            <option value="1:1">1:1 (Square - Instagram & Facebook Feed)</option>
+            <option value="4:5">4:5 (Portrait - Social Feed)</option>
+            <option value="9:16">9:16 (Vertical Story & Reels)</option>
+            <option value="16:9">16:9 (Landscape Banner)</option>
+          </select>
+          <small>Output image dimension ratio passed to OpenRouter.</small>
+        </label>
+
+        <label>
+          <span>Output quality</span>
+          <select
+            value={settings.quality || "high"}
+            onChange={event => setSettings(current => ({ ...current, quality: event.target.value }))}
+            className="ai-model-select"
+          >
+            <option value="high">High (Maximum Polish & Resolution)</option>
+            <option value="standard">Standard (Balanced)</option>
+            <option value="medium">Medium (Fast Output)</option>
+          </select>
+          <small>Controls output detail & rendering fidelity.</small>
+        </label>
 
         <label>
           <span>Temperature</span>
@@ -230,19 +266,6 @@ export default function AdRedesignSettingsPanel({
             onChange={event => setSettings(current => ({ ...current, temperature: event.target.value }))}
           />
           <small>Controls creativity of the performance marketing redesign.</small>
-        </label>
-
-        <label>
-          <span>Maximum output tokens</span>
-          <input
-            type="number"
-            min="200"
-            max="4000"
-            step="50"
-            value={settings.max_output_tokens}
-            onChange={event => setSettings(current => ({ ...current, max_output_tokens: Number(event.target.value) }))}
-          />
-          <small>Allocated for image generation payload output.</small>
         </label>
 
         <label>
@@ -263,22 +286,19 @@ export default function AdRedesignSettingsPanel({
           </small>
         </label>
 
-        <label>
-          <span>Monthly budget</span>
-          <div className="money-input">
-            <b>$</b>
-            <input
-              type="number"
-              min="0.01"
-              max="10000"
-              step="1"
-              value={settings.monthly_budget_usd}
-              onChange={event => setSettings(current => ({ ...current, monthly_budget_usd: event.target.value }))}
-            />
-          </div>
-          <small>
-            Equivalent to {formatCurrency(settings.monthly_budget_usd, currency, 2, exchangeRate)}. Pauses auto-redesign when reached.
-          </small>
+        <label className="full-width-field" style={{ gridColumn: "1 / -1" }}>
+          <span>
+            <Sliders size={14} style={{ display: "inline-block", verticalAlign: "middle", marginRight: "6px" }} />
+            Extra Creative Guidance & Fine-Tuning
+          </span>
+          <input
+            type="text"
+            value={settings.creative_guidance || ""}
+            onChange={event => setSettings(current => ({ ...current, creative_guidance: event.target.value || null }))}
+            placeholder="e.g. Use vibrant dark background, bold yellow typography, clean badges, clear CTA button"
+            className="ai-model-custom-input"
+          />
+          <small>Additional style directions appended to every ad redesign request to fine-tune image generation outputs.</small>
         </label>
       </div>
 

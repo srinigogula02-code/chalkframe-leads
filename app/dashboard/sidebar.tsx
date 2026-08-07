@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { BarChart3, Bot, CheckCircle2, LayoutGrid, LogOut, Menu, Palette, Sparkles, Users } from "lucide-react";
+import { BarChart3, Bot, CheckCircle2, LayoutGrid, LogOut, Mail, Menu, Palette, Sparkles, Users } from "lucide-react";
 import { logoutAction } from "@/app/actions";
 import type { SessionUser } from "@/lib/db";
 
-type Section = "leads" | "research" | "redesign" | "stats" | "ai" | "ai_ad_redesigns";
+type Section = "leads" | "research" | "redesign" | "stats" | "ai" | "ai_ad_redesigns" | "email_template";
 
 export default function DashboardSidebar({ user, active }: { user: SessionUser; active: Section }) {
   const navigation = (
@@ -26,6 +26,9 @@ export default function DashboardSidebar({ user, active }: { user: SessionUser; 
           </Link>
           <Link prefetch={false} className={`nav-item ${active === "ai_ad_redesigns" ? "active" : ""}`} href="/dashboard/ai-ad-redesigns">
             <Sparkles size={18} />AI Ad Redesigns
+          </Link>
+          <Link prefetch={false} className={`nav-item ${active === "email_template" ? "active" : ""}`} href="/dashboard/email-template">
+            <Mail size={18} />Email Template
           </Link>
           <Link prefetch={false} className={`nav-item ${active === "stats" ? "active" : ""}`} href="/dashboard/stats">
             <BarChart3 size={18} />Stats

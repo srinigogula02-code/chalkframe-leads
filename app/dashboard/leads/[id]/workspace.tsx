@@ -61,18 +61,27 @@ export default function BusinessWorkspace({ lead, previousId, nextId, statusFilt
     const target=redesignAll?"all":sourceImageId||sourceImageUrl||"fb_url";
     setRedesignTarget(target);
     setError("");
-    setMessage(redesignAll?"Generating AI ad redesigns for all creatives…":"Generating performance marketing AI ad redesign…");
+    setMessage(redesignAll?"Queueing AI ad redesigns for all creatives…":"Queueing performance marketing AI ad redesign…");
     try{
       const res=await fetch(`/api/admin/leads/${lead.id}/ad-redesign`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({sourceImageId,sourceImageUrl,redesignAll})});
       const body=await res.json();
       if(!res.ok)throw new Error(body.error||"AI Ad Redesign generation failed.");
-      setMessage(redesignAll?`Generated ${body.count||"all"} AI ad redesigns for this business!`: "AI Ad Redesign generated and added to business profile!");
-      await refreshCollages();
-      router.refresh();
+      setMessage("AI Ad Redesign queued! Generating image in background…");
+      setRedesignTarget(null);
+
+      // Poll workspace updates every 4 seconds for up to 3 minutes
+      let attempts=0;
+      const pollInterval=window.setInterval(async()=>{
+        attempts++;
+        await refreshCollages();
+        router.refresh();
+        if(attempts>=45){
+          window.clearInterval(pollInterval);
+        }
+      },4000);
     }catch(e){
       setMessage("");
       setError(e instanceof Error?e.message:"AI Ad Redesign generation failed.");
-    }finally{
       setRedesignTarget(null);
     }
   }

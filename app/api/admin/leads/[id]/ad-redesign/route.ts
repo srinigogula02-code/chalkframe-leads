@@ -1,79 +1,79 @@
 import { after, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { processAdCreativeImage } from "@/lib/ad-creative-processor";
 import { processCollageQueue } from "@/lib/collage";
 import { sql } from "@/lib/db";
 import { generateAdRedesign } from "@/lib/openrouter-ad-redesign";
+
+export const maxDuration = 300;
+export const dynamic = "force-dynamic";
+
+async function resolveSourceImageId(leadId: string, sourceImageId?: string, sourceImageUrl?: string) {
+  if (sourceImageId) {
+    const rows = await sql`SELECT id FROM lead_images WHERE id=${sourceImageId} AND lead_id=${leadId} LIMIT 1`;
+    if (!rows[0]) throw new Error("The selected creative no longer belongs to this business. Refresh the page and try again.");
+    return String(rows[0].id);
+  }
+  const url = sourceImageUrl?.trim();
+  if (url) {
+    const existing = await sql`SELECT id FROM lead_images WHERE lead_id=${leadId} AND url=${url} LIMIT 1`;
+    if (existing[0]) return String(existing[0].id);
+    const processed = await processAdCreativeImage(url);
+    const positionRows = await sql`SELECT COALESCE(MAX(position), 0) + 1 AS position FROM lead_images WHERE lead_id=${leadId}`;
+    const inserted = await sql`INSERT INTO lead_images (lead_id, url, description, position)
+      SELECT ${leadId}, ${processed.url}, 'Source creative added for AI redesign', ${Number(positionRows[0].position)}
+      WHERE EXISTS (SELECT 1 FROM leads WHERE id=${leadId})
+      RETURNING id`;
+    if (!inserted[0]) throw new Error("Business lead not found.");
+    return String(inserted[0].id);
+  }
+  const first = await sql`SELECT id FROM lead_images WHERE lead_id=${leadId} ORDER BY position ASC LIMIT 1`;
+  if (!first[0]) throw new Error("Add an original ad creative before generating a redesign.");
+  return String(first[0].id);
+}
 
 export async function POST(req: Request, context: { params: Promise<{ id: string }> }) {
   const user = await getSession();
   if (!user || user.role !== "admin") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id: leadId } = await context.params;
-  const body = (await req.json().catch(() => ({}))) as {
-    sourceImageUrl?: string;
-    sourceImageId?: string;
-    redesignAll?: boolean;
-  };
-
-  if (body.redesignAll) {
-    const allImgs = await sql`SELECT id, url FROM lead_images WHERE lead_id=${leadId} ORDER BY position ASC`;
-    if (!allImgs.length) {
-      return NextResponse.json({ error: "No original ad creative images found for this business." }, { status: 400 });
-    }
-
-    const results = [];
-    for (const img of allImgs) {
-      try {
-        const res = await generateAdRedesign({
-          leadId,
-          sourceImageUrl: String(img.url),
-          sourceImageId: String(img.id),
-          trigger: "manual",
-        });
-        results.push(res);
-      } catch (err) {
-        console.error(`Failed to redesign image ${img.id}:`, err);
-      }
-    }
-
-    if (!results.length) {
-      return NextResponse.json({ error: "Failed to generate redesigns for business ad creatives." }, { status: 500 });
-    }
-    after(() => processCollageQueue(leadId));
-    return NextResponse.json({ ok: true, count: results.length, redesigns: results });
-  }
-
-  let sourceImageUrl = String(body.sourceImageUrl || "").trim();
-  let sourceImageId: string | null = body.sourceImageId ? String(body.sourceImageId) : null;
-
-  if (sourceImageId && !sourceImageUrl) {
-    const imgRows = await sql`SELECT url FROM lead_images WHERE id=${sourceImageId} AND lead_id=${leadId}`;
-    if (imgRows[0]) {
-      sourceImageUrl = String(imgRows[0].url);
-    }
-  }
-
-  if (!sourceImageUrl) {
-    const imgRows = await sql`SELECT id, url FROM lead_images WHERE lead_id=${leadId} ORDER BY position ASC LIMIT 1`;
-    if (imgRows[0]) {
-      sourceImageId = String(imgRows[0].id);
-      sourceImageUrl = String(imgRows[0].url);
-    }
-  }
-
-  if (!sourceImageUrl) {
-    return NextResponse.json({ error: "An original ad creative image or URL is required." }, { status: 400 });
-  }
+  const body = (await req.json().catch(() => ({}))) as { sourceImageUrl?: unknown; sourceImageId?: unknown; redesignAll?: unknown };
+  const sourceImageId = typeof body.sourceImageId === "string" ? body.sourceImageId.trim() : "";
+  const sourceImageUrl = typeof body.sourceImageUrl === "string" ? body.sourceImageUrl.trim() : "";
 
   try {
-    const result = await generateAdRedesign({
-      leadId,
-      sourceImageUrl,
-      sourceImageId,
-      trigger: "manual",
+    if (body.redesignAll === true) {
+      const images = await sql`SELECT id FROM lead_images WHERE lead_id=${leadId} ORDER BY position ASC`;
+      if (!images.length) return NextResponse.json({ error: "Add an original ad creative before generating redesigns." }, { status: 400 });
+      
+      // Non-blocking background queueing for Vercel free plan compatibility
+      after(async () => {
+        for (const image of images) {
+          try {
+            await generateAdRedesign({ leadId, sourceImageId: String(image.id), trigger: "manual" });
+          } catch (err) {
+            console.error("[Ad Redesign Background All Error]", err);
+          }
+        }
+        processCollageQueue(leadId);
+      });
+
+      return NextResponse.json({ ok: true, queued: true, message: `Queued redesigns for ${images.length} creative(s) in background.` }, { status: 202 });
+    }
+
+    const resolvedSourceImageId = await resolveSourceImageId(leadId, sourceImageId || undefined, sourceImageUrl || undefined);
+    
+    // Non-blocking background queueing for single creative redesign
+    after(async () => {
+      try {
+        await generateAdRedesign({ leadId, sourceImageId: resolvedSourceImageId, trigger: "manual" });
+        processCollageQueue(leadId);
+      } catch (err) {
+        console.error("[Ad Redesign Background Single Error]", err);
+      }
     });
-    after(() => processCollageQueue(leadId));
-    return NextResponse.json({ ok: true, redesign: result });
+
+    return NextResponse.json({ ok: true, queued: true, message: "AI ad redesign queued in background." }, { status: 202 });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Ad redesign generation failed." }, { status: 500 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Ad redesign generation failed." }, { status: 502 });
   }
 }

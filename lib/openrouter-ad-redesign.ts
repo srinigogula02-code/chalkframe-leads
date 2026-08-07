@@ -1,445 +1,202 @@
 import "server-only";
+
 import { randomUUID } from "node:crypto";
 import sharp from "sharp";
-import { processAdCreativeImage } from "./ad-creative-processor";
 import { getEffectiveAdRedesignPrompt } from "./ad-redesign-prompt";
+import { processAdCreativeImage } from "./ad-creative-processor";
 import { sql } from "./db";
 import { uploadLeadImage } from "./r2";
 
 type AdRedesignSettings = {
   enabled: boolean;
-  auto_redesign_on_ad_add: boolean;
   model: string;
   fallback_model: string | null;
-  temperature: number;
-  max_output_tokens: number;
   max_cost_usd: number;
   monthly_budget_usd: number;
   system_prompt_override: string | null;
+  aspect_ratio: string;
+  quality: string;
+  creative_guidance: string | null;
 };
 
-async function isValidImageBuffer(buffer: Buffer): Promise<boolean> {
-  try {
-    const meta = await sharp(buffer).metadata();
-    return Boolean(meta.format && ["jpeg", "png", "webp", "gif", "avif", "tiff"].includes(meta.format));
-  } catch {
-    return false;
-  }
+type GenerationResponse = {
+  id?: string;
+  model?: string;
+  data?: Array<{ b64_json?: string; media_type?: string }>;
+  usage?: { cost?: number };
+};
+
+const IMAGE_TIMEOUT_MS = 180_000;
+
+function autoAspectRatio(width: number, height: number): string {
+  if (!width || !height) return "1:1";
+  const ratio = width / height;
+  const choices = [
+    { value: "1:1", target: 1.0 },
+    { value: "4:5", target: 0.8 },
+    { value: "9:16", target: 9 / 16 },
+    { value: "16:9", target: 16 / 9 },
+    { value: "4:3", target: 4 / 3 },
+    { value: "3:4", target: 3 / 4 },
+  ];
+  choices.sort((a, b) => Math.abs(Math.log(ratio / a.target)) - Math.abs(Math.log(ratio / b.target)));
+  return choices[0].value;
 }
 
-function getModelImageCost(modelId: string): number {
-  const id = modelId.toLowerCase();
-  if (id.includes("gpt-image-2") || id.includes("gpt-5.4-image-2")) return 0.13;
-  if (id.includes("gpt-5-image") || id.includes("gpt-5.4-image") || id.includes("gpt-image-1")) return 0.08;
-  if (id.includes("dall-e-3")) return 0.04;
-  if (id.includes("seedream")) return 0.05;
-  if (id.includes("recraft")) return 0.04;
-  if (id.includes("flux.2-pro") || id.includes("flux-1-pro") || id.includes("flux-pro")) return 0.05;
-  if (id.includes("flux-1-schnell") || id.includes("flux-schnell") || id.includes("flux-dev")) return 0.01;
-  if (id.includes("gemini")) return 0.015;
-  if (id.includes("stable-diffusion") || id.includes("sdxl")) return 0.03;
-  return 0.02;
+function buildPrompt(leadTitle: string, override: string | null | undefined, creativeGuidance: string | null | undefined) {
+  const basePrompt = getEffectiveAdRedesignPrompt(override);
+  const parts = [
+    `Business: ${leadTitle}.`,
+    basePrompt,
+  ];
+
+  if (creativeGuidance && creativeGuidance.trim()) {
+    parts.push(`Creative Guidance & Style: ${creativeGuidance.trim()}`);
+  }
+
+  return parts.join("\n\n");
 }
 
-async function extractAdCreativeVisionDetails(imageUrl: string, apiKey: string): Promise<string> {
-  try {
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-        "HTTP-Referer": "https://chalkframe.work",
-        "X-Title": "Chalkframe Performance Ad Redesign",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: "Inspect this ad creative image carefully. Briefly summarize: 1. The exact product/service/niche (e.g. custom t-shirt wholesale manufacturing). 2. Main headlines & text offers (e.g. MOQ: 50-100 Pcs). 3. Key visual elements (e.g. t-shirts, workshop). Keep it under 2 sentences.",
-              },
-              {
-                type: "image_url",
-                image_url: { url: imageUrl },
-              },
-            ],
-          },
-        ],
-        max_tokens: 200,
-      }),
-      signal: AbortSignal.timeout(15_000),
-    });
-
-    if (res.ok) {
-      const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-      const text = data.choices?.[0]?.message?.content;
-      if (typeof text === "string" && text.trim()) {
-        return text.trim();
-      }
-    }
-  } catch (err) {
-    console.warn("Could not extract vision details from source ad image:", err);
-  }
-  return "";
+async function markRunFailed(runId: string, startedAt: number, code: string, message: string) {
+  await sql`UPDATE lead_ad_redesign_runs SET status='failed', error_code=${code}, error_message=${message.slice(0, 1000)}, latency_ms=${Date.now() - startedAt}, completed_at=now() WHERE id=${runId}`;
 }
 
 export async function generateAdRedesign({
   leadId,
-  sourceImageUrl,
   sourceImageId,
   trigger = "manual",
 }: {
   leadId: string;
-  sourceImageUrl: string;
-  sourceImageId?: string | null;
+  sourceImageId: string;
   trigger?: "manual" | "automatic";
 }) {
-  const startTime = Date.now();
-
-  const [settingsRow, leadRow, monthlySpendRow] = await Promise.all([
-    sql`SELECT enabled, auto_redesign_on_ad_add, model, fallback_model, temperature, max_output_tokens, max_cost_usd, monthly_budget_usd, system_prompt_override FROM ai_ad_redesign_settings WHERE id=1`,
-    sql`SELECT id, title FROM leads WHERE id=${leadId}`,
+  const startedAt = Date.now();
+  const [settingsRows, sourceRows, monthlySpendRows] = await Promise.all([
+    sql`SELECT enabled, model, fallback_model, max_cost_usd, monthly_budget_usd, system_prompt_override, aspect_ratio, quality, creative_guidance FROM ai_ad_redesign_settings WHERE id=1`,
+    sql`SELECT l.title, i.id, i.url FROM leads l JOIN lead_images i ON i.lead_id=l.id WHERE l.id=${leadId} AND i.id=${sourceImageId} LIMIT 1`,
     sql`SELECT COALESCE(SUM(cost_usd), 0)::text AS spend FROM lead_ad_redesign_runs WHERE created_at >= date_trunc('month', now()) AND status='completed'`,
   ]);
 
-  if (!leadRow[0]) throw new Error("Business lead not found.");
-  const settings = settingsRow[0] as unknown as AdRedesignSettings;
-  const leadTitle = String(leadRow[0].title || "Meta ad business");
+  const settings = settingsRows[0] as unknown as AdRedesignSettings | undefined;
+  const source = sourceRows[0] as { title: string | null; id: string; url: string } | undefined;
 
-  if (!settings.enabled) {
-    throw new Error("AI Ad Redesign generation is currently paused in settings.");
-  }
+  if (!settings) throw new Error("AI ad redesign settings are not initialized.");
+  if (!source) throw new Error("Choose an ad creative that belongs to this business.");
+  if (!settings.enabled) throw new Error("AI ad redesign generation is paused in settings.");
+  if (Number(monthlySpendRows[0]?.spend || 0) >= Number(settings.monthly_budget_usd)) throw new Error("Monthly AI ad redesign budget limit reached.");
 
-  const monthlyBudget = Number(settings.monthly_budget_usd);
-  const currentMonthSpend = Number(monthlySpendRow[0]?.spend || 0);
-  if (monthlyBudget > 0 && currentMonthSpend >= monthlyBudget) {
-    await sql`INSERT INTO lead_ad_redesign_runs (lead_id, source_image_id, source_image_url, lead_title, trigger, status, requested_model, prompt_used, error_code, error_message)
-      VALUES (${leadId}, ${sourceImageId || null}, ${sourceImageUrl}, ${leadTitle}, ${trigger}, 'blocked', ${settings.model}, 'budget_exceeded', 'BUDGET_LIMIT', 'Monthly AI ad redesign budget limit reached.')`;
-    throw new Error("Monthly AI ad redesign budget limit reached.");
-  }
-
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is not configured.");
 
-  // Process & upload source ad image server-side
-  const processedSource = await processAdCreativeImage(sourceImageUrl);
+  const models = [settings.model, settings.fallback_model].filter((model, index, list): model is string => Boolean(model?.trim()) && list.indexOf(model) === index);
+  if (!models.length) throw new Error("Choose an image model in AI Ad Redesign settings.");
 
-  // Extract visual copy & product details from source image using Vision AI
-  const visionSummary = await extractAdCreativeVisionDetails(processedSource.url, apiKey);
-  const baseSystemPrompt = getEffectiveAdRedesignPrompt(settings.system_prompt_override);
-
-  const fullPromptText = [
-    `Performance marketing ad creative redesign for business "${leadTitle}".`,
-    visionSummary ? `Original Ad Visuals & Copy: ${visionSummary}` : "",
-    `Design Directives: ${baseSystemPrompt}`,
-    `Create a sleek, high-converting, modern 4:5 Instagram ad creative. Bold headline typography, clean mobile visual hierarchy, premium product focus matching the business niche above, uncluttered layout.`,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-
-  const openRouterModel = settings.model || "google/gemini-2.5-flash-image";
+  const leadTitle = String(source.title || "Meta ad business");
+  const prompt = buildPrompt(leadTitle, settings.system_prompt_override, settings.creative_guidance);
+  const processedSource = await processAdCreativeImage(source.url);
 
   const runRows = await sql`INSERT INTO lead_ad_redesign_runs (lead_id, source_image_id, source_image_url, lead_title, trigger, status, requested_model, prompt_used)
-    VALUES (${leadId}, ${sourceImageId || null}, ${processedSource.url}, ${leadTitle}, ${trigger}, 'processing', ${openRouterModel}, ${fullPromptText})
-    RETURNING id`;
+    VALUES (${leadId}, ${source.id}, ${processedSource.url}, ${leadTitle}, ${trigger}, 'processing', ${models[0]}, ${prompt}) RETURNING id`;
   const runId = String(runRows[0].id);
 
+  let targetAspectRatio = settings.aspect_ratio || "1:1";
+  if (targetAspectRatio === "auto") {
+    targetAspectRatio = autoAspectRatio(processedSource.width, processedSource.height);
+  }
+
   try {
-    let rawImageOutput = "";
-    let actualModelName = openRouterModel;
-    let finalRedesignBytes: Buffer | null = null;
-    let actualCostUsd: number | null = null;
-    let lastErrorMsg = "";
-
-    // Tier 1: Dedicated OpenRouter Image Generation API (/api/v1/images) passing input_references to all models
-    try {
-      const attempts = [
-        // Attempt A: Pass input_references with aspect_ratio "auto"
-        {
-          model: openRouterModel,
-          prompt: fullPromptText,
-          aspect_ratio: "auto",
-          input_references: [
-            {
-              type: "image_url",
-              image_url: { url: processedSource.url },
+    let lastFailure = "";
+    for (const model of models) {
+      const requestPayload: Record<string, unknown> = {
+        model,
+        prompt,
+        input_references: [
+          {
+            type: "image_url",
+            image_url: {
+              url: processedSource.url,
             },
-          ],
-        },
-        // Attempt B: Pass input_references without aspect_ratio
-        {
-          model: openRouterModel,
-          prompt: fullPromptText,
-          input_references: [
-            {
-              type: "image_url",
-              image_url: { url: processedSource.url },
-            },
-          ],
-        },
-        // Attempt C: Fallback to prompt-only
-        {
-          model: openRouterModel,
-          prompt: fullPromptText,
-        },
-      ];
-
-      for (const attemptBody of attempts) {
-        if (finalRedesignBytes || rawImageOutput) break;
-
-        const imgApiRes = await fetch("https://openrouter.ai/api/v1/images", {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${apiKey}`,
-            "content-type": "application/json",
-            "HTTP-Referer": "https://chalkframe.work",
-            "X-Title": "Chalkframe Performance Ad Redesign",
           },
-          body: JSON.stringify(attemptBody),
-          signal: AbortSignal.timeout(90_000),
-        });
+        ],
+      };
 
-        if (imgApiRes.ok) {
-          const payload = (await imgApiRes.json()) as {
-            data?: Array<{ b64_json?: string; url?: string; media_type?: string }>;
-            usage?: { cost?: number };
-          };
-          if (typeof payload.usage?.cost === "number" && payload.usage.cost > 0) {
-            actualCostUsd = payload.usage.cost;
-          }
+      if (targetAspectRatio) requestPayload.aspect_ratio = targetAspectRatio;
+      if (settings.quality) requestPayload.quality = settings.quality;
 
-          const first = payload.data?.[0];
-          if (first?.b64_json) {
-            const candidate = Buffer.from(first.b64_json, "base64");
-            if (await isValidImageBuffer(candidate)) {
-              finalRedesignBytes = candidate;
-              break;
-            }
-          } else if (first?.url) {
-            rawImageOutput = first.url;
-            break;
-          }
-        } else {
-          const errText = await imgApiRes.text();
-          lastErrorMsg = `OpenRouter Image API (${openRouterModel}) returned status ${imgApiRes.status}: ${errText.slice(0, 250)}`;
-          console.warn(lastErrorMsg);
-        }
+      const response = await fetch("https://openrouter.ai/api/v1/images", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+          "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "https://leads.chalkframe.com",
+          "X-Title": "Chalkframe Performance Ad Redesign",
+        },
+        body: JSON.stringify(requestPayload),
+        signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        lastFailure = `${model} returned ${response.status}: ${errorText.slice(0, 500)}`;
+        console.error(`[AI Ad Redesign] ${model} failed:`, response.status, errorText);
+        continue;
       }
-    } catch (imgApiErr) {
-      lastErrorMsg = imgApiErr instanceof Error ? imgApiErr.message : "Dedicated Image API call failed.";
-      console.warn(`Dedicated Image API call to ${openRouterModel} failed:`, imgApiErr);
-    }
 
-    // Tier 2: OpenRouter Multimodal Chat Completions API (/api/v1/chat/completions) with image_url input
-    if (!finalRedesignBytes && !rawImageOutput) {
+      const payload = (await response.json()) as GenerationResponse;
+      const imageB64 = payload.data?.[0]?.b64_json;
+      if (!imageB64) {
+        lastFailure = `${model} returned no image bytes.`;
+        continue;
+      }
+
+      const generated = Buffer.from(imageB64, "base64");
       try {
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${apiKey}`,
-            "content-type": "application/json",
-            "HTTP-Referer": "https://chalkframe.work",
-            "X-Title": "Chalkframe Performance Ad Redesign",
-          },
-          body: JSON.stringify({
-            model: openRouterModel,
-            messages: [
-              {
-                role: "user",
-                content: [
-                  { type: "text", text: fullPromptText },
-                  { type: "image_url", image_url: { url: processedSource.url } },
-                ],
-              },
-            ],
-            temperature: Number(settings.temperature),
-            max_tokens: Number(settings.max_output_tokens),
-          }),
-          signal: AbortSignal.timeout(90_000),
-        });
-
-        if (response.ok) {
-          const payload = (await response.json()) as {
-            id?: string;
-            model?: string;
-            choices?: Array<{
-              message?: {
-                content?: string | Array<{ type: string; image_url?: { url: string }; text?: string }>;
-                images?: Array<string | { type?: string; image_url?: { url?: string }; url?: string }>;
-              };
-            }>;
-            usage?: { cost?: number };
-          };
-
-          if (payload.model) actualModelName = payload.model;
-          if (typeof payload.usage?.cost === "number" && payload.usage.cost > 0) {
-            actualCostUsd = payload.usage.cost;
-          }
-
-          const choice = payload.choices?.[0]?.message;
-
-          if (choice?.images && choice.images.length > 0) {
-            const firstImg = choice.images[0];
-            if (typeof firstImg === "string") {
-              rawImageOutput = firstImg;
-            } else if (typeof firstImg === "object" && firstImg !== null) {
-              rawImageOutput = firstImg.image_url?.url || firstImg.url || "";
-            }
-          }
-
-          if (!rawImageOutput && typeof choice?.content === "string") {
-            const match = choice.content.match(/data:image\/[a-zA-Z+]+;base64,[^\s"')]+/);
-            if (match) {
-              rawImageOutput = match[0];
-            } else {
-              const urlMatch = choice.content.match(/https?:\/\/[^\s"')]+\.(png|jpg|jpeg|webp)/i);
-              if (urlMatch) rawImageOutput = urlMatch[0];
-            }
-          } else if (!rawImageOutput && Array.isArray(choice?.content)) {
-            for (const item of choice.content) {
-              if (item.type === "image_url" && item.image_url?.url) {
-                rawImageOutput = item.image_url.url;
-                break;
-              }
-            }
-          }
-        } else {
-          const errText = await response.text();
-          lastErrorMsg = `OpenRouter Chat API (${openRouterModel}) returned status ${response.status}: ${errText.slice(0, 250)}`;
-        }
-      } catch (chatErr) {
-        lastErrorMsg = chatErr instanceof Error ? chatErr.message : "Chat completions call failed.";
-        console.warn(`Chat completions call to ${openRouterModel} failed:`, chatErr);
+        await sharp(generated, { failOn: "error", limitInputPixels: 40_000_000 }).metadata();
+      } catch {
+        lastFailure = `${model} returned invalid image bytes.`;
+        continue;
       }
-    }
 
-    // Decode base64 or fetch rawImageOutput if populated
-    if (!finalRedesignBytes && rawImageOutput) {
-      if (rawImageOutput.startsWith("data:image/")) {
-        const matches = rawImageOutput.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
-        if (matches) {
-          const candidate = Buffer.from(matches[2], "base64");
-          if (await isValidImageBuffer(candidate)) {
-            finalRedesignBytes = candidate;
-          }
-        }
-      } else if (rawImageOutput.startsWith("http")) {
-        try {
-          const imgRes = await fetch(rawImageOutput, { signal: AbortSignal.timeout(25_000) });
-          const cType = imgRes.headers.get("content-type") || "";
-          if (imgRes.ok && (cType.startsWith("image/") || cType.includes("octet-stream"))) {
-            const candidate = Buffer.from(await imgRes.arrayBuffer());
-            if (await isValidImageBuffer(candidate)) {
-              finalRedesignBytes = candidate;
-            }
-          }
-        } catch (err) {
-          console.warn("Could not download image from rawImageOutput URL:", err);
-        }
+      const cost = Number(payload.usage?.cost || 0);
+      if (cost > Number(settings.max_cost_usd) && Number(settings.max_cost_usd) > 0) {
+        await markRunFailed(runId, startedAt, "PER_IMAGE_COST_LIMIT", `The generated image cost $${cost.toFixed(4)}, exceeding limit of $${Number(settings.max_cost_usd).toFixed(4)}.`);
+        throw new Error("The generated image exceeded the per-image cost limit and was not saved.");
       }
+
+      const compressed = await sharp(generated).webp({ quality: 92 }).toBuffer();
+      const redesignUrl = await uploadLeadImage({
+        key: `redesigns/${randomUUID()}.webp`,
+        bytes: new Uint8Array(compressed),
+        contentType: "image/webp",
+        cacheControl: "public, max-age=31536000, immutable",
+      });
+
+      const positionRows = await sql`SELECT COALESCE(MAX(position), 0) + 1 AS position FROM redesign_images WHERE lead_id=${leadId}`;
+      const redesignRows = await sql`INSERT INTO redesign_images (lead_id, url, description, position, collage_status, collage_source_image_id, collage_requested_at)
+        VALUES (${leadId}, ${redesignUrl}, 'AI redesign generated from selected ad creative', ${Number(positionRows[0].position)}, 'queued', ${source.id}, now()) RETURNING id`;
+      const redesignId = String(redesignRows[0].id);
+
+      await sql.transaction([
+        sql`UPDATE leads SET collage_original_image_id=${source.id}, workflow_status=CASE WHEN workflow_status IN ('research_pending', 'research_completed') THEN 'redesign_created' ELSE workflow_status END, updated_at=now() WHERE id=${leadId}`,
+        sql`UPDATE lead_ad_redesign_runs SET status='completed', actual_model=${payload.model || model}, generation_id=${payload.id || null}, redesign_image_id=${redesignId}, redesign_image_url=${redesignUrl}, cost_usd=${cost || null}, latency_ms=${Date.now() - startedAt}, completed_at=now() WHERE id=${runId}`,
+      ]);
+
+      return {
+        runId,
+        redesignId,
+        redesignUrl,
+        sourceUrl: processedSource.url,
+        latencyMs: Date.now() - startedAt,
+        costUsd: cost || null,
+        actualModel: payload.model || model,
+      };
     }
 
-    // Tier 3: High-Speed Secondary Fallback Engine via Pollinations Flux
-    if (!finalRedesignBytes) {
-      console.log("LLM returned text or model failed. Rendering performance marketing ad creative image via Flux fallback engine...");
-      const seed = Math.floor(Math.random() * 1_000_000);
-      const cleanPrompt = visionSummary
-        ? `High converting Instagram ad creative for ${leadTitle}. ${visionSummary}. 4:5 mobile ratio, modern performance marketing typography, sleek product showcase`
-        : `Modern uncluttered Instagram ad creative for ${leadTitle}, sleek performance marketing aesthetic, elegant typography, premium product photography, 4:5 ratio, high contrast visual hierarchy`;
-      const fluxUrl = `https://pollinations.ai/p/${encodeURIComponent(cleanPrompt)}?width=1080&height=1080&seed=${seed}&model=flux&nologo=true`;
-
-      try {
-        const fluxRes = await fetch(fluxUrl, { signal: AbortSignal.timeout(30_000) });
-        if (fluxRes.ok) {
-          const candidate = Buffer.from(await fluxRes.arrayBuffer());
-          if (await isValidImageBuffer(candidate)) {
-            finalRedesignBytes = candidate;
-            actualModelName = `${openRouterModel} (via Flux engine)`;
-          }
-        }
-      } catch (fluxErr) {
-        console.warn("Flux fallback engine failed:", fluxErr);
-      }
-    }
-
-    if (!finalRedesignBytes) {
-      throw new Error(lastErrorMsg || `Could not generate valid image output from model '${openRouterModel}'.`);
-    }
-
-    // Determine final billing cost in USD
-    const finalCostUsd = actualCostUsd && actualCostUsd > 0 ? actualCostUsd : getModelImageCost(actualModelName);
-
-    // Compress & convert generated image to WebP with sharp
-    const compressed = await sharp(finalRedesignBytes)
-      .resize({ width: 1080, height: 1080, fit: "inside", withoutEnlargement: true })
-      .webp({ quality: 85 })
-      .toBuffer();
-
-    // Upload generated redesign image to Cloudflare R2 CDN
-    const r2Key = `redesigns/${randomUUID()}.webp`;
-    const finalRedesignUrl = await uploadLeadImage({
-      key: r2Key,
-      bytes: new Uint8Array(compressed),
-      contentType: "image/webp",
-      cacheControl: "public, max-age=31536000, immutable",
-    });
-
-    const latencyMs = Date.now() - startTime;
-
-    // Ensure lead has a selected original creative for collages
-    let targetOriginalId = sourceImageId || null;
-    if (!targetOriginalId) {
-      const origRows = await sql`SELECT collage_original_image_id FROM leads WHERE id=${leadId}`;
-      targetOriginalId = origRows[0]?.collage_original_image_id ? String(origRows[0].collage_original_image_id) : null;
-    }
-    if (!targetOriginalId) {
-      const firstOrig = await sql`SELECT id FROM lead_images WHERE lead_id=${leadId} ORDER BY position ASC LIMIT 1`;
-      if (firstOrig[0]) targetOriginalId = String(firstOrig[0].id);
-    }
-
-    if (targetOriginalId) {
-      await sql`UPDATE leads SET collage_original_image_id=${targetOriginalId}, updated_at=now() WHERE id=${leadId} AND collage_original_image_id IS NULL`;
-    }
-
-    // Save new redesign image entry into business workspace (redesign_images)
-    const posRow = await sql`SELECT COALESCE(MAX(position), 0) + 1 AS pos FROM redesign_images WHERE lead_id=${leadId}`;
-    const nextPos = Number(posRow[0]?.pos || 1);
-
-    const redesignInsert = await sql`INSERT INTO redesign_images (lead_id, url, description, position, collage_status, collage_source_image_id, collage_requested_at)
-      VALUES (${leadId}, ${finalRedesignUrl}, 'AI Performance Marketing Redesign', ${nextPos}, 'queued', ${targetOriginalId}, now())
-      RETURNING id, url, description, collage_status`;
-
-    const redesignId = String(redesignInsert[0].id);
-
-    // Update redesign run audit log with exact billing cost
-    await sql`UPDATE lead_ad_redesign_runs
-      SET status='completed', actual_model=${actualModelName},
-          redesign_image_id=${redesignId}, redesign_image_url=${finalRedesignUrl}, cost_usd=${finalCostUsd},
-          latency_ms=${latencyMs}, completed_at=now()
-      WHERE id=${runId}`;
-
-    // Automatically transition business lead workflow status to 'redesign_created'
-    await sql`UPDATE leads
-      SET workflow_status='redesign_created', updated_at=now()
-      WHERE id=${leadId} AND workflow_status IN ('research_pending', 'research_completed')`;
-
-    return {
-      runId,
-      redesignId,
-      redesignUrl: finalRedesignUrl,
-      sourceUrl: processedSource.url,
-      latencyMs,
-      costUsd: finalCostUsd,
-    };
+    await markRunFailed(runId, startedAt, "REFERENCE_GENERATION_FAILED", lastFailure || "No configured model could generate from the source creative.");
+    throw new Error(lastFailure || "No configured model could generate from the selected creative.");
   } catch (error) {
-    const latencyMs = Date.now() - startTime;
-    const msg = error instanceof Error ? error.message : "AI Ad Redesign generation failed.";
-    await sql`UPDATE lead_ad_redesign_runs
-      SET status='failed', error_message=${msg}, latency_ms=${latencyMs}, completed_at=now()
-      WHERE id=${runId}`;
+    const message = error instanceof Error ? error.message : "AI ad redesign generation failed.";
+    await sql`UPDATE lead_ad_redesign_runs SET status='failed', error_message=COALESCE(error_message, ${message}), latency_ms=${Date.now() - startedAt}, completed_at=COALESCE(completed_at, now()) WHERE id=${runId} AND status='processing'`;
     throw error;
   }
 }

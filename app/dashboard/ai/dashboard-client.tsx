@@ -79,7 +79,8 @@ export default function AIEmailsDashboardClient({
   useEffect(() => {
     const saved = localStorage.getItem("chalkframe_dashboard_currency");
     if (saved === "USD" || saved === "INR") {
-      setCurrency(saved);
+      const timer = window.setTimeout(() => setCurrency(saved), 0);
+      return () => window.clearTimeout(timer);
     }
   }, []);
 

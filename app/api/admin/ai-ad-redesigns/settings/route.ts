@@ -12,7 +12,7 @@ const finite = (value: unknown) => {
 export async function GET() {
   const user = await getSession();
   if (!user || user.role !== "admin") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const rows = await sql`SELECT enabled, auto_redesign_on_ad_add, model, fallback_model, temperature, max_output_tokens, max_cost_usd, monthly_budget_usd, system_prompt_override, updated_at FROM ai_ad_redesign_settings WHERE id=1`;
+  const rows = await sql`SELECT enabled, auto_redesign_on_ad_add, model, fallback_model, temperature, max_output_tokens, max_cost_usd, monthly_budget_usd, system_prompt_override, aspect_ratio, quality, creative_guidance, updated_at FROM ai_ad_redesign_settings WHERE id=1`;
   if (!rows[0]) return NextResponse.json({ error: "Settings not found." }, { status: 404 });
   return NextResponse.json({ settings: rows[0] });
 }
@@ -30,6 +30,9 @@ export async function PATCH(req: Request) {
   const monthlyBudgetUsd = finite(body.monthlyBudgetUsd);
   const systemPromptOverride = clean(body.systemPromptOverride, 30_000);
   const autoRedesignOnAdAdd = Boolean(body.autoRedesignOnAdAdd);
+  const aspectRatio = clean(body.aspectRatio, 20) || "1:1";
+  const quality = clean(body.quality, 20) || "high";
+  const creativeGuidance = clean(body.creativeGuidance, 5_000);
 
   if (!model) return NextResponse.json({ error: "Choose a primary image generation model." }, { status: 400 });
   if (fallbackModel && fallbackModel === model) return NextResponse.json({ error: "The fallback model must be different from the primary model." }, { status: 400 });
@@ -49,8 +52,9 @@ export async function PATCH(req: Request) {
     SET enabled=${body.enabled !== false}, auto_redesign_on_ad_add=${autoRedesignOnAdAdd}, model=${model},
         fallback_model=${fallbackModel || null}, temperature=${temperature}, max_output_tokens=${maxOutputTokens},
         max_cost_usd=${maxCostUsd}, monthly_budget_usd=${monthlyBudgetUsd}, system_prompt_override=${systemPromptOverride || null},
+        aspect_ratio=${aspectRatio}, quality=${quality}, creative_guidance=${creativeGuidance || null},
         updated_by=${user.id}, updated_at=now()
-    WHERE id=1 RETURNING enabled, auto_redesign_on_ad_add, model, fallback_model, temperature, max_output_tokens, max_cost_usd, monthly_budget_usd, system_prompt_override, updated_at`;
+    WHERE id=1 RETURNING enabled, auto_redesign_on_ad_add, model, fallback_model, temperature, max_output_tokens, max_cost_usd, monthly_budget_usd, system_prompt_override, aspect_ratio, quality, creative_guidance, updated_at`;
 
   if (!rows[0]) return NextResponse.json({ error: "AI ad redesign settings are not initialized." }, { status: 500 });
   return NextResponse.json({ saved: true, settings: rows[0] });
