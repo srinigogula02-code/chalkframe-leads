@@ -108,6 +108,13 @@ export default async function StatsPage() {
             <small>{total ? Math.round((progressed / total) * 100) : 0}% redesigned/contacted</small>
           </div>
           <div>
+            <span className="technical">Ad Inactive</span>
+            <strong style={{ color: counts.ad_inactive > 0 ? "#f59e0b" : "inherit" }}>
+              {counts.ad_inactive.toLocaleString("en-IN")}
+            </strong>
+            <small>{total ? Math.round((counts.ad_inactive / total) * 100) : 0}% parked leads</small>
+          </div>
+          <div>
             <span className="technical">Resend Emails Sent</span>
             <strong>{Number(emailSummary.total_sent).toLocaleString("en-IN")}</strong>
             <small>{Number(emailSummary.today_sent).toLocaleString("en-IN")} sent today</small>

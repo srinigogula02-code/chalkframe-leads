@@ -36,6 +36,27 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { id } = await params;
   const body = await req.json();
   if (!isWorkflowStatus(body.workflowStatus)) return NextResponse.json({ error: "Choose a valid business status." }, { status: 400 });
+
+  // If redesignImages is not provided, update only the lead record (e.g. status change)
+  if (body.redesignImages === undefined) {
+    const chatgptUrl = clean(body.chatgptUrl, 4_000);
+    if (chatgptUrl && !validUrl(chatgptUrl)) return NextResponse.json({ error: "ChatGPT URL must start with http:// or https://." }, { status: 400 });
+    const requestedOriginal = clean(body.collageOriginalImageId, 36);
+
+    const rows = await sql`
+      UPDATE leads
+      SET admin_notes = COALESCE(${clean(body.adminNotes, 10_000) || null}, admin_notes),
+          chatgpt_url = COALESCE(${chatgptUrl || null}, chatgpt_url),
+          workflow_status = ${body.workflowStatus},
+          collage_original_image_id = CASE WHEN ${Boolean(requestedOriginal)} THEN ${requestedOriginal}::uuid ELSE collage_original_image_id END,
+          updated_at = now()
+      WHERE id = ${id}
+      RETURNING id, workflow_status, collage_original_image_id
+    `;
+    if (!rows[0]) return NextResponse.json({ error: "Business not found." }, { status: 404 });
+    return NextResponse.json({ saved: true, workflowStatus: rows[0].workflow_status, collageOriginalImageId: rows[0].collage_original_image_id });
+  }
+
   const rawImages:unknown[] = Array.isArray(body.redesignImages) ? body.redesignImages : [];
   const images:ParsedImage[] = rawImages.slice(0, 30).map((item: unknown, position: number) => {
     const image = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;

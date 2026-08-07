@@ -198,10 +198,6 @@ export default function RedesignReview({ user, lead, previousId, nextId }: { use
   return (
     <main className="redesign-review-page">
       <header className="redesign-review-topbar">
-        <Link href="/dashboard" className="back-link">
-          <ArrowLeft size={16} />
-          Lead workspace
-        </Link>
         <img src="/brand/chalkframe-logo-dark.svg" alt="Chalkframe" />
         <nav className="record-nav">
           <Link aria-disabled={!previousId} className={!previousId ? "disabled" : ""} href={previousId ? `/dashboard/redesign-created/${previousId}` : "#"}>
@@ -213,8 +209,8 @@ export default function RedesignReview({ user, lead, previousId, nextId }: { use
             <span>Next</span>
             <ArrowRight size={16} />
           </Link>
+          {user && <NavDropdown user={user} />}
         </nav>
-        {user && <NavDropdown user={user} />}
       </header>
       <section className="redesign-review-hero">
           <div className="review-title">
