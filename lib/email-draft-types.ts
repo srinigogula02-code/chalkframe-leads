@@ -12,4 +12,5 @@ export type EmailDraft = {
   latencyMs: number | null;
   recipientEmail: string | null;
   updatedAt: string;
+  sentAt: string | null;
 };

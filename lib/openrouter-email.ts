@@ -4,9 +4,11 @@ import { OpenRouter } from "@openrouter/agent";
 import { maxCost, stepCountIs } from "@openrouter/agent/stop-conditions";
 import { DEFAULT_EMAIL_SYSTEM_PROMPT, EMAIL_PROMPT_VERSION, buildEmailInput } from "@/lib/email-prompt";
 import { sql } from "@/lib/db";
+import { sendLeadRedesignEmail } from "@/lib/resend-email";
 
 type EmailSettings = {
   enabled: boolean;
+  auto_send_enabled: boolean;
   model: string;
   fallback_model: string | null;
   temperature: string | number;
@@ -127,9 +129,30 @@ function getErrorMessage(error: unknown) {
 }
 
 async function loadSettings(): Promise<EmailSettings> {
-  const rows = await sql`SELECT enabled, model, fallback_model, temperature, max_output_tokens, max_cost_usd, monthly_budget_usd, system_prompt_override FROM ai_settings WHERE id=1`;
+  const rows = await sql`SELECT enabled, auto_send_enabled, model, fallback_model, temperature, max_output_tokens, max_cost_usd, monthly_budget_usd, system_prompt_override FROM ai_settings WHERE id=1`;
   if (!rows[0]) throw new Error("AI email settings are not initialized. Apply migration 007_openrouter_email_drafts.sql.");
   return rows[0] as unknown as EmailSettings;
+}
+
+async function autoSendCompletedDraft(draft:DraftRow,subject:string,body:string){
+  const claimed=await sql`UPDATE lead_email_drafts SET auto_send_status='sending',auto_send_error=NULL,auto_send_attempted_at=now(),updated_at=now()
+    WHERE id=${draft.id} AND status='completed' AND auto_send_status='not_requested'
+      AND NOT EXISTS (SELECT 1 FROM sent_emails s WHERE s.lead_id=${draft.lead_id} AND s.redesign_image_id=${draft.redesign_image_id} AND s.status='sent')
+    RETURNING id`;
+  if(!claimed[0])return false;
+  if(!draft.recipient_email){
+    await sql`UPDATE lead_email_drafts SET auto_send_status='failed',auto_send_error='The business does not have a recipient email address.',updated_at=now() WHERE id=${draft.id}`;
+    return false;
+  }
+  try{
+    await sendLeadRedesignEmail({leadId:draft.lead_id,redesignImageId:draft.redesign_image_id,recipientEmail:draft.recipient_email,subject,bodyMarkdown:body,collageUrl:draft.source_collage_url});
+    return true;
+  }catch(error){
+    const message=getErrorMessage(error);
+    await sql`UPDATE lead_email_drafts SET auto_send_status='failed',auto_send_error=${message},updated_at=now() WHERE id=${draft.id}`;
+    console.error(`[Email auto-send] Draft ${draft.id} could not be delivered:`,message);
+    return false;
+  }
 }
 
 export async function queueEmailDraftsForLead(
@@ -173,6 +196,8 @@ export async function queueEmailDraftsForLead(
       error_message=CASE WHEN ${Boolean(options.force)} OR lead_email_drafts.source_collage_url IS DISTINCT FROM EXCLUDED.source_collage_url OR lead_email_drafts.recipient_email IS DISTINCT FROM EXCLUDED.recipient_email THEN NULL ELSE lead_email_drafts.error_message END,
       started_at=CASE WHEN ${Boolean(options.force)} OR lead_email_drafts.source_collage_url IS DISTINCT FROM EXCLUDED.source_collage_url OR lead_email_drafts.recipient_email IS DISTINCT FROM EXCLUDED.recipient_email THEN NULL ELSE lead_email_drafts.started_at END,
       completed_at=CASE WHEN ${Boolean(options.force)} OR lead_email_drafts.source_collage_url IS DISTINCT FROM EXCLUDED.source_collage_url OR lead_email_drafts.recipient_email IS DISTINCT FROM EXCLUDED.recipient_email THEN NULL ELSE lead_email_drafts.completed_at END,
+      auto_send_status=CASE WHEN (${Boolean(options.force)} OR lead_email_drafts.source_collage_url IS DISTINCT FROM EXCLUDED.source_collage_url OR lead_email_drafts.recipient_email IS DISTINCT FROM EXCLUDED.recipient_email) AND lead_email_drafts.auto_send_status<>'sent' THEN 'not_requested' ELSE lead_email_drafts.auto_send_status END,
+      auto_send_error=CASE WHEN ${Boolean(options.force)} OR lead_email_drafts.source_collage_url IS DISTINCT FROM EXCLUDED.source_collage_url OR lead_email_drafts.recipient_email IS DISTINCT FROM EXCLUDED.recipient_email THEN NULL ELSE lead_email_drafts.auto_send_error END,
       updated_at=now()
     RETURNING id, status`;
   return { queued: rows.filter(row => row.status === "queued").length, drafts: rows.length, enabled: settings.enabled };
@@ -381,6 +406,9 @@ export async function processEmailDraftQueue(leadId: string) {
           input_tokens=${generated.usage.inputTokens}, output_tokens=${generated.usage.outputTokens}, total_tokens=${generated.usage.totalTokens},
           cost_usd=${generated.usage.cost}, latency_ms=${generated.latencyMs}, completed_at=now() WHERE id=${runId}`,
       ]);
+      if(!isReview&&settings.auto_send_enabled&&subject&&body){
+        try{await autoSendCompletedDraft(draft,subject,body)}catch(error){console.error(`[Email auto-send] Draft ${draft.id} delivery state could not be updated:`,getErrorMessage(error))}
+      }
       processed += 1;
     } catch (error) {
       const code = getErrorCode(error);

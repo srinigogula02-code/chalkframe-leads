@@ -22,7 +22,7 @@ export default async function AIEmailsPage() {
   if (user.role !== "admin") redirect("/dashboard");
 
   const [settingsRows, summaryRows, modelRows, recentRuns, draftStatuses, models, credits, exchangeRate] = await Promise.all([
-    sql`SELECT enabled, model, fallback_model, temperature, max_output_tokens, max_cost_usd, monthly_budget_usd, system_prompt_override, updated_at FROM ai_settings WHERE id=1`,
+    sql`SELECT enabled, auto_send_enabled, model, fallback_model, temperature, max_output_tokens, max_cost_usd, monthly_budget_usd, system_prompt_override, updated_at FROM ai_settings WHERE id=1`,
     sql`SELECT COUNT(*)::text AS total_runs,
       COUNT(*) FILTER (WHERE status='completed')::text AS completed_runs,
       COUNT(*) FILTER (WHERE status='needs_review')::text AS review_runs,
@@ -60,6 +60,7 @@ export default async function AIEmailsPage() {
       <DashboardSidebar user={user} active="ai" />
       <AIEmailsDashboardClient
         apiKeyConfigured={apiKeyConfigured}
+        resendConfigured={Boolean(process.env.RESEND_API_KEY?.trim())}
         settings={settings}
         summary={summary}
         modelRows={modelRows as unknown as ModelRow[]}

@@ -304,8 +304,13 @@ export async function sendLeadRedesignEmail({
     VALUES (${leadId}, ${redesignImageId || null}, ${resendId}, ${recipientEmail.trim()}, ${senderEmail}, ${subject.trim()}, ${bodyMarkdown}, ${htmlContent}, ${collageUrl || null}, 'sent')
     RETURNING id, resend_id, sent_at`;
 
-  // Update lead workflow status to contacted
-  await sql`UPDATE leads SET workflow_status='contacted', updated_at=now() WHERE id=${leadId}`;
+  // A successful real delivery always advances the business and closes any draft auto-send claim.
+  await Promise.all([
+    sql`UPDATE leads SET workflow_status='contacted', updated_at=now() WHERE id=${leadId}`,
+    redesignImageId
+      ? sql`UPDATE lead_email_drafts SET auto_send_status='sent', auto_send_error=NULL, auto_sent_at=now(), updated_at=now() WHERE lead_id=${leadId} AND redesign_image_id=${redesignImageId}`
+      : Promise.resolve([]),
+  ]);
 
   return {
     sentEmailId: String(row[0].id),

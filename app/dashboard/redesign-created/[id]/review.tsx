@@ -147,6 +147,7 @@ export default function RedesignReview({ user, lead, previousId, nextId }: { use
                       latencyMs: null,
                       recipientEmail: lead.email,
                       updatedAt: new Date().toISOString(),
+                      sentAt: null,
                     },
               }
             : image,

@@ -20,12 +20,14 @@ export async function PATCH(req: Request) {
   const maxCostUsd = finite(body.maxCostUsd);
   const monthlyBudgetUsd = finite(body.monthlyBudgetUsd);
   const systemPromptOverride = clean(body.systemPromptOverride, 30_000);
+  const autoSendEnabled = body.autoSendEnabled === true;
   if (!model) return NextResponse.json({ error: "Choose a primary vision model." }, { status: 400 });
   if (fallbackModel && fallbackModel === model) return NextResponse.json({ error: "The fallback model must be different from the primary model." }, { status: 400 });
   if (temperature === null || temperature < 0 || temperature > 2) return NextResponse.json({ error: "Temperature must be between 0 and 2." }, { status: 400 });
   if (maxOutputTokens === null || !Number.isInteger(maxOutputTokens) || maxOutputTokens < 200 || maxOutputTokens > 2_000) return NextResponse.json({ error: "Maximum output tokens must be a whole number between 200 and 2,000." }, { status: 400 });
   if (maxCostUsd === null || maxCostUsd <= 0 || maxCostUsd > 10) return NextResponse.json({ error: "Per-email cost limit must be between $0.001 and $10." }, { status: 400 });
   if (monthlyBudgetUsd === null || monthlyBudgetUsd <= 0 || monthlyBudgetUsd > 10_000) return NextResponse.json({ error: "Monthly budget must be between $0.01 and $10,000." }, { status: 400 });
+  if (autoSendEnabled && !process.env.RESEND_API_KEY?.trim()) return NextResponse.json({ error: "Configure RESEND_API_KEY before enabling automatic email delivery." }, { status: 400 });
 
   const available = await getVisionModels();
   if (available.length) {
@@ -34,10 +36,10 @@ export async function PATCH(req: Request) {
     if (fallbackModel && !ids.has(fallbackModel)) return NextResponse.json({ error: `Fallback model "${fallbackModel}" is not a recognized vision-capable model.` }, { status: 400 });
   }
 
-  const rows = await sql`UPDATE ai_settings SET enabled=${body.enabled !== false}, model=${model}, fallback_model=${fallbackModel || null},
+  const rows = await sql`UPDATE ai_settings SET enabled=${body.enabled !== false}, auto_send_enabled=${autoSendEnabled}, model=${model}, fallback_model=${fallbackModel || null},
     temperature=${temperature}, max_output_tokens=${maxOutputTokens}, max_cost_usd=${maxCostUsd}, monthly_budget_usd=${monthlyBudgetUsd},
     system_prompt_override=${systemPromptOverride || null}, updated_by=${user.id}, updated_at=now()
-    WHERE id=1 RETURNING enabled, model, fallback_model, temperature, max_output_tokens, max_cost_usd, monthly_budget_usd, system_prompt_override, updated_at`;
+    WHERE id=1 RETURNING enabled, auto_send_enabled, model, fallback_model, temperature, max_output_tokens, max_cost_usd, monthly_budget_usd, system_prompt_override, updated_at`;
   if (!rows[0]) return NextResponse.json({ error: "AI settings are not initialized." }, { status: 500 });
   return NextResponse.json({ saved: true, settings: rows[0] });
 }

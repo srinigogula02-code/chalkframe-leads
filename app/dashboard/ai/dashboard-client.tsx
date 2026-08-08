@@ -53,6 +53,7 @@ const compact = (value: string | number | null | undefined) =>
 
 export default function AIEmailsDashboardClient({
   apiKeyConfigured,
+  resendConfigured,
   settings,
   summary,
   modelRows,
@@ -64,6 +65,7 @@ export default function AIEmailsDashboardClient({
   exchangeRate = DEFAULT_USD_TO_INR,
 }: {
   apiKeyConfigured: boolean;
+  resendConfigured: boolean;
   settings: AISettings;
   summary: Summary;
   modelRows: ModelRow[];
@@ -215,6 +217,7 @@ export default function AIEmailsDashboardClient({
 
       <SettingsPanel
         initial={settings}
+        resendConfigured={resendConfigured}
         models={models}
         defaultPrompt={defaultPrompt}
         currency={currency}

@@ -1,12 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Check, Edit3, Pause, Play, RefreshCw, Save, ShieldCheck } from "lucide-react";
+import { Check, Edit3, MailCheck, Pause, Play, RefreshCw, Save, ShieldCheck } from "lucide-react";
 import { CurrencyCode, DEFAULT_USD_TO_INR, formatCurrency, formatPerMillion } from "@/lib/currency";
 import type { OpenRouterModelOption } from "@/lib/openrouter-models";
 
 export type AISettings = {
   enabled: boolean;
+  auto_send_enabled: boolean;
   model: string;
   fallback_model: string | null;
   temperature: string | number;
@@ -96,12 +97,14 @@ function ModelSelectorField({
 
 export default function SettingsPanel({
   initial,
+  resendConfigured,
   models,
   defaultPrompt,
   currency = "INR",
   exchangeRate = DEFAULT_USD_TO_INR,
 }: {
   initial: AISettings;
+  resendConfigured: boolean;
   models: OpenRouterModelOption[];
   defaultPrompt: string;
   currency?: CurrencyCode;
@@ -125,6 +128,7 @@ export default function SettingsPanel({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           enabled: settings.enabled,
+          autoSendEnabled: settings.auto_send_enabled,
           model: settings.model,
           fallbackModel: settings.fallback_model,
           temperature: settings.temperature,
@@ -161,20 +165,23 @@ export default function SettingsPanel({
           <h2>Email model settings</h2>
           <p>Changes apply to future drafts and manual regenerations. Select from all available OpenRouter models or customize system instructions.</p>
         </div>
-        <button
-          className={settings.enabled ? "ai-enabled" : "ai-paused"}
-          onClick={() => setSettings(current => ({ ...current, enabled: !current.enabled }))}
-        >
-          {settings.enabled ? (
-            <>
-              <Play size={14} /> Generation active
-            </>
-          ) : (
-            <>
-              <Pause size={14} /> Generation paused
-            </>
-          )}
-        </button>
+        <div className="ai-settings-toggles">
+          <button
+            className={settings.enabled ? "ai-enabled" : "ai-paused"}
+            onClick={() => setSettings(current => ({ ...current, enabled: !current.enabled }))}
+          >
+            {settings.enabled ? <><Play size={14} /> Generation active</> : <><Pause size={14} /> Generation paused</>}
+          </button>
+          <button
+            className={settings.auto_send_enabled ? "ai-auto-send-enabled" : "ai-auto-send-paused"}
+            onClick={() => setSettings(current => ({ ...current, auto_send_enabled: !current.auto_send_enabled }))}
+            disabled={!resendConfigured}
+            title={resendConfigured ? "Automatically deliver newly completed drafts" : "Configure RESEND_API_KEY before enabling auto-send"}
+          >
+            <MailCheck size={14} /> {settings.auto_send_enabled ? "Auto-send active" : "Auto-send off"}
+          </button>
+          <small>{resendConfigured ? "When active, every newly completed draft is sent immediately to the business email." : "RESEND_API_KEY is required for automatic delivery."}</small>
+        </div>
       </header>
 
       <div className="ai-settings-grid">
