@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { BarChart3, Bot, CheckCircle2, LayoutGrid, LogOut, Mail, Menu, Palette, Sparkles, Users } from "lucide-react";
+import { BarChart3, Bot, CheckCircle2, Database, LayoutGrid, LogOut, Mail, Menu, Palette, Sparkles, Users } from "lucide-react";
 import { logoutAction } from "@/app/actions";
 import type { SessionUser } from "@/lib/db";
 
-type Section = "leads" | "research" | "redesign" | "stats" | "ai" | "ai_ad_redesigns" | "email_template";
+type Section = "leads" | "research" | "redesign" | "stats" | "ai" | "ai_ad_redesigns" | "email_template" | "apify";
 
 export default function DashboardSidebar({ user, active }: { user: SessionUser; active: Section }) {
   const navigation = (
@@ -29,6 +29,9 @@ export default function DashboardSidebar({ user, active }: { user: SessionUser; 
           </Link>
           <Link prefetch={false} className={`nav-item ${active === "email_template" ? "active" : ""}`} href="/dashboard/email-template">
             <Mail size={18} />Email Template
+          </Link>
+          <Link prefetch={false} className={`nav-item ${active === "apify" ? "active" : ""}`} href="/dashboard/apify">
+            <Database size={18} />Apify Automation
           </Link>
           <Link prefetch={false} className={`nav-item ${active === "stats" ? "active" : ""}`} href="/dashboard/stats">
             <BarChart3 size={18} />Stats

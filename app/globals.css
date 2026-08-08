@@ -140,3 +140,15 @@
 /* ── Ad Inactive status pill ───────────────────────────────────── */
 .status.ad_inactive i{background:#f59e0b}
 
+/* ── Apify business enrichment ────────────────────────────────── */
+.apify-workspace{gap:22px}
+.apify-settings-panel .ai-settings-grid{grid-template-columns:1.4fr 1fr 1fr}
+.apify-bulk-card{display:flex;align-items:center;justify-content:space-between;gap:28px;padding:26px 28px;border:1px solid var(--line);border-radius:20px;background:linear-gradient(120deg,#fff 0%,#f8fbff 100%);box-shadow:var(--shadow-sm)}
+.apify-bulk-card h2{margin:5px 0 7px;font-size:22px}.apify-bulk-card p{margin:0;color:var(--muted);max-width:720px;line-height:1.55}.apify-bulk-card .primary-button{white-space:nowrap}
+.apify-run-list{width:100%}.apify-run-card{border:1px solid var(--line);border-radius:15px;background:#fff;padding:17px 18px;display:grid;gap:12px}.apify-run-card.processing,.apify-run-card.queued{border-color:#bfd7ff}.apify-run-card.failed,.apify-run-card.blocked{border-color:#f3c7c3}
+.apify-run-main{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.apify-run-main>div:first-child{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.apify-run-main strong{font-size:15px}.apify-run-main small{width:100%;color:var(--muted)}
+.apify-run-metrics{display:flex;gap:7px!important;justify-content:flex-end;flex-wrap:wrap}.apify-run-metrics span{padding:6px 9px;border-radius:8px;background:#f4f6f8;color:#46505a;font-size:12px;font-weight:700}
+.apify-run-warning{display:flex;align-items:flex-start;gap:8px;margin:0;padding:10px 12px;border-radius:9px;background:#fff8e8;color:#805d13;font-size:12px;line-height:1.45}
+.apify-run-card footer{display:flex;justify-content:flex-end;align-items:center;gap:9px;border-top:1px solid #eef0f2;padding-top:11px}.apify-run-card footer a,.apify-run-card footer button{display:inline-flex;align-items:center;gap:5px;border:0;background:none;color:var(--ink);font:inherit;font-size:12px;font-weight:800;cursor:pointer}.apify-run-card footer a{text-decoration:none;color:#315da8}.apify-run-card footer button:disabled{opacity:.45;cursor:not-allowed}
+.run-status-badge.queued{background:#eef5ff;color:#315da8}.settings-message{margin-top:16px;padding:11px 13px;border-radius:10px;font-size:13px;font-weight:700}.settings-message.success{background:#eaf8ef;color:#216b3a}.settings-message.error{background:#fff0ee;color:#a23b32}
+@media(max-width:900px){.apify-settings-panel .ai-settings-grid{grid-template-columns:1fr}.apify-bulk-card,.apify-run-main{align-items:stretch;flex-direction:column}.apify-bulk-card .primary-button{justify-content:center}.apify-run-metrics{justify-content:flex-start!important}}

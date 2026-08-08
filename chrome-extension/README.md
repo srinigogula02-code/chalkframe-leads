@@ -9,4 +9,4 @@
 5. Pin **Chalkframe Leads** to the toolbar.
 6. Open the extension and sign in with an administrator account.
 
-On Meta Ad Library, copy an ad URL containing an ad `id`. The extension adds it to the Leads queue and shows a confirmation. Duplicate links are not added.
+On Meta Ad Library, copy an ad URL containing an ad `id`. The extension adds it to the Leads queue, captures the nearby business name when Meta exposes it, and shows a confirmation. Duplicate links are not added. Reload the unpacked extension after updating these files.

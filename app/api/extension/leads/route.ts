@@ -1,7 +1,10 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { verifyExtensionToken } from "@/lib/auth";
 import { sql } from "@/lib/db";
 import { parseMetaAdLibraryUrl } from "@/lib/meta-ad";
+import { processQueuedEnrichmentRuns, queueLeadEnrichment } from "@/lib/apify-enrichment";
+
+export const maxDuration = 300;
 
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type, authorization", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 export function OPTIONS() { return new NextResponse(null, { status: 204, headers: cors }); }
@@ -13,11 +16,12 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const ad = parseMetaAdLibraryUrl(body.adUrl);
   if (!ad) return NextResponse.json({ error: "Copy a Meta Ad Library link containing a valid ad ID." }, { status: 400, headers: cors });
+  const title = String(body.title || "").replace(/\s+/g, " ").trim().slice(0, 160) || null;
 
   try {
     const rows = await sql`WITH inserted AS (
       INSERT INTO leads (ad_url, meta_ad_id, title, created_by)
-      VALUES (${ad.canonicalUrl}, ${ad.adId}, NULL, ${user.id})
+      VALUES (${ad.canonicalUrl}, ${ad.adId}, ${title}, ${user.id})
       ON CONFLICT (meta_ad_id) DO NOTHING
       RETURNING id
     ), tallied AS (
@@ -36,6 +40,13 @@ export async function POST(req: Request) {
       (SELECT id FROM inserted LIMIT 1) AS id
     FROM tallied`;
     const added = Boolean(rows[0]?.added);
+    if (added && rows[0]?.id) {
+      const enrichmentRunId = await queueLeadEnrichment(String(rows[0].id), "automatic").catch(error => {
+        console.error("Extension Apify enrichment could not be queued", error);
+        return null;
+      });
+      if (enrichmentRunId) after(() => processQueuedEnrichmentRuns(1));
+    }
     return NextResponse.json({ added, duplicate: !added, id: rows[0]?.id ?? null }, { headers: cors });
   } catch (error) {
     console.error("Extension lead capture failed", error);

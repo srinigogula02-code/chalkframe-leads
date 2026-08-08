@@ -1,7 +1,7 @@
 const API = "https://leads.chalkframe.com/api/extension";
 
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
-  if (message.type === "ADD_AD") addAd(message.url, sender.tab?.id).then(respond);
+  if (message.type === "ADD_AD") addAd(message.url, message.title, sender.tab?.id).then(respond);
   if (message.type === "STATUS") getStatus().then(respond);
   if (message.type === "LOGIN") login(message.username, message.password).then(respond);
   if (message.type === "LOGOUT") chrome.storage.local.clear().then(() => respond({ ok: true }));
@@ -23,11 +23,11 @@ async function getStatus() {
   return { connected: Boolean(token), user };
 }
 
-async function addAd(url, tabId) {
+async function addAd(url, title, tabId) {
   const { token } = await chrome.storage.local.get("token");
   if (!token) return notify(tabId, false, "Connect the extension first.");
   try {
-    const response = await fetch(`${API}/leads`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify({ adUrl: url }) });
+    const response = await fetch(`${API}/leads`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify({ adUrl: url, title }) });
     const body = await response.json();
     if (response.status === 401) await chrome.storage.local.remove(["token", "user"]);
     return notify(tabId, response.ok, response.ok ? "Added to Chalkframe Leads" : body.error || "Could not add this ad.");

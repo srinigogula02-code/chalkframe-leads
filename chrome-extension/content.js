@@ -10,24 +10,55 @@ function findMetaAdUrl(text) {
   } catch { return null; }
 }
 
-function submit(text) {
+function cleanBusinessName(value) {
+  const name = String(value || "").replace(/\s+/g, " ").trim();
+  if (!name || name.length < 2 || name.length > 160) return null;
+  if (/^(?:meta ad library|ad library|sponsored|active|inactive|see ad details|view details|facebook)$/i.test(name)) return null;
+  return name;
+}
+
+function findBusinessName(source) {
+  let root = source instanceof Element ? source : null;
+  const roots = [];
+  for (let depth = 0; root && depth < 10; depth += 1, root = root.parentElement) roots.push(root);
+  roots.push(document.body);
+  const selectors = [
+    'a[href*="view_all_page_id"]',
+    'a[href*="facebook.com/"]:not([href*="/ads/library"])',
+    '[role="heading"]',
+    'strong',
+  ];
+  for (const candidateRoot of roots) {
+    for (const selector of selectors) {
+      const matches = candidateRoot.matches?.(selector) ? [candidateRoot] : [];
+      for (const element of [...matches, ...candidateRoot.querySelectorAll(selector)]) {
+        const name = cleanBusinessName(element.textContent);
+        if (name) return name;
+      }
+    }
+  }
+  return null;
+}
+
+function submit(text, source) {
   const url = findMetaAdUrl(text);
   const now = Date.now();
   if (!url || (url === lastUrl && now - lastSentAt < 5000)) return;
   lastUrl = url; lastSentAt = now;
-  chrome.runtime.sendMessage({ type: "ADD_AD", url });
+  chrome.runtime.sendMessage({ type: "ADD_AD", url, title: findBusinessName(source) });
 }
 
 document.addEventListener("copy", event => {
-  submit(event.clipboardData?.getData("text/plain"));
-  setTimeout(() => navigator.clipboard.readText().then(submit).catch(() => {}), 80);
+  const source = event.target;
+  submit(event.clipboardData?.getData("text/plain"), source);
+  setTimeout(() => navigator.clipboard.readText().then(text => submit(text, source)).catch(() => {}), 80);
 }, true);
 
 document.addEventListener("click", event => {
   const control = event.target instanceof Element ? event.target.closest("button, [role='button'], a") : null;
   const label = `${control?.textContent || ""} ${control?.getAttribute("aria-label") || ""}`;
   if (!/copy|link/i.test(label)) return;
-  [100, 350, 800].forEach(delay => setTimeout(() => navigator.clipboard.readText().then(submit).catch(() => {}), delay));
+  [100, 350, 800].forEach(delay => setTimeout(() => navigator.clipboard.readText().then(text => submit(text, control)).catch(() => {}), delay));
 }, true);
 
 chrome.runtime.onMessage.addListener(message => {

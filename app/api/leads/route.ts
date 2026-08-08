@@ -1,8 +1,11 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { sql } from "@/lib/db";
 import { getDashboardData } from "@/lib/dashboard-data";
 import { parseMetaAdLibraryUrl } from "@/lib/meta-ad";
+import { processQueuedEnrichmentRuns, queueLeadEnrichment } from "@/lib/apify-enrichment";
+
+export const maxDuration = 300;
 
 export async function GET(req: Request) {
   const user = await getSession();
@@ -26,6 +29,11 @@ export async function POST(req: Request) {
   try {
     const rows = await sql`INSERT INTO leads (ad_url, meta_ad_id, title, created_by) VALUES (${ad.canonicalUrl}, ${ad.adId}, ${String(title || "").trim().slice(0, 160) || null}, ${user.id}) ON CONFLICT (meta_ad_id) DO NOTHING RETURNING *, '[]'::json AS images`;
     if (!rows[0]) return NextResponse.json({ error: "This ad is already in Leads." }, { status: 409 });
+    const enrichmentRunId = await queueLeadEnrichment(String(rows[0].id), "automatic").catch(error => {
+      console.error("Automatic Apify enrichment could not be queued", error);
+      return null;
+    });
+    if (enrichmentRunId) after(() => processQueuedEnrichmentRuns(1));
     return NextResponse.json({ lead: rows[0] });
   } catch (error) {
     console.error("Dashboard lead capture failed", error);
