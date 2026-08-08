@@ -1,5 +1,6 @@
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
+import { compressImage } from "@/lib/compress-image";
 import { sql } from "@/lib/db";
 import { uploadLeadImage } from "@/lib/r2";
 import { decryptSecret } from "@/lib/secret-crypto";
@@ -149,12 +150,11 @@ async function storeCreative(leadId: string, runId: string, source: { url: strin
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (!bytes.byteLength || bytes.byteLength > MAX_IMAGE_BYTES) throw new Error("Creative image is empty or too large.");
   const contentType = (response.headers.get("content-type") || "image/jpeg").split(";")[0].toLowerCase();
-  const extensions: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
-  const extension = extensions[contentType];
-  if (!extension) throw new Error(`Unsupported creative image type: ${contentType}.`);
+  if (!["image/jpeg", "image/png", "image/webp", "image/gif"].includes(contentType)) throw new Error(`Unsupported creative image type: ${contentType}.`);
+  const optimized = await compressImage(bytes, contentType);
   const now = new Date();
-  const key = `leads/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/apify/${leadId}/${runId}-${index}-${randomUUID()}.${extension}`;
-  const url = await uploadLeadImage({ key, bytes, contentType });
+  const key = `leads/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/apify/${leadId}/${runId}-${index}-${randomUUID()}.${optimized.extension}`;
+  const url = await uploadLeadImage({ key, bytes: optimized.bytes, contentType: optimized.contentType });
   await sql`INSERT INTO lead_images (lead_id, url, source_url, source_fingerprint, description, position)
     VALUES (${leadId}, ${url}, ${source.url}, ${fingerprint}, ${source.description}, (SELECT COALESCE(MAX(position), -1) + 1 FROM lead_images WHERE lead_id=${leadId}))
     ON CONFLICT (lead_id, source_fingerprint) WHERE source_fingerprint IS NOT NULL DO NOTHING`;

@@ -43,7 +43,7 @@ function autoAspectRatio(width: number, height: number): string {
   return choices[0].value;
 }
 
-function buildPrompt(leadTitle: string, override: string | null | undefined, creativeGuidance: string | null | undefined) {
+function buildPrompt(leadTitle: string, override: string | null | undefined, creativeGuidance: string | null | undefined, creativeDescription: string | null | undefined) {
   const basePrompt = getEffectiveAdRedesignPrompt(override);
   const parts = [
     `Business: ${leadTitle}.`,
@@ -52,6 +52,10 @@ function buildPrompt(leadTitle: string, override: string | null | undefined, cre
 
   if (creativeGuidance && creativeGuidance.trim()) {
     parts.push(`Creative Guidance & Style: ${creativeGuidance.trim()}`);
+  }
+
+  if (creativeDescription && creativeDescription.trim()) {
+    parts.push(`Ad creative description: ${creativeDescription.trim().slice(0, 1_000)}\nUse information from this description of the ad creative only when it is relevant and useful for the redesign. Do not force every detail into the image.`);
   }
 
   return parts.join("\n\n");
@@ -73,12 +77,12 @@ export async function generateAdRedesign({
   const startedAt = Date.now();
   const [settingsRows, sourceRows, monthlySpendRows] = await Promise.all([
     sql`SELECT enabled, model, fallback_model, max_cost_usd, monthly_budget_usd, system_prompt_override, aspect_ratio, quality, creative_guidance FROM ai_ad_redesign_settings WHERE id=1`,
-    sql`SELECT l.title, i.id, i.url FROM leads l JOIN lead_images i ON i.lead_id=l.id WHERE l.id=${leadId} AND i.id=${sourceImageId} LIMIT 1`,
+    sql`SELECT l.title, i.id, i.url, i.description FROM leads l JOIN lead_images i ON i.lead_id=l.id WHERE l.id=${leadId} AND i.id=${sourceImageId} LIMIT 1`,
     sql`SELECT COALESCE(SUM(cost_usd), 0)::text AS spend FROM lead_ad_redesign_runs WHERE created_at >= date_trunc('month', now()) AND status='completed'`,
   ]);
 
   const settings = settingsRows[0] as unknown as AdRedesignSettings | undefined;
-  const source = sourceRows[0] as { title: string | null; id: string; url: string } | undefined;
+  const source = sourceRows[0] as { title: string | null; id: string; url: string; description: string | null } | undefined;
 
   if (!settings) throw new Error("AI ad redesign settings are not initialized.");
   if (!source) throw new Error("Choose an ad creative that belongs to this business.");
@@ -92,7 +96,7 @@ export async function generateAdRedesign({
   if (!models.length) throw new Error("Choose an image model in AI Ad Redesign settings.");
 
   const leadTitle = String(source.title || "Meta ad business");
-  const prompt = buildPrompt(leadTitle, settings.system_prompt_override, settings.creative_guidance);
+  const prompt = buildPrompt(leadTitle, settings.system_prompt_override, settings.creative_guidance, source.description);
   const processedSource = await processAdCreativeImage(source.url);
 
   const runRows = await sql`INSERT INTO lead_ad_redesign_runs (lead_id, source_image_id, source_image_url, lead_title, trigger, status, requested_model, prompt_used)
